@@ -6,6 +6,7 @@ local game,main,view,incoming,trade
 local broadcast
 local outgoing,queueHead,sending={},1,false
 local pendingBroadcast=false
+local syncElapsed,lastSync=0,-10
 local labels={R="Stein",P="Papier",S="Schere"}
 local beats={R="S",P="R",S="P"}
 local function readable(v) return not (canaccessvalue and not canaccessvalue(v)) and not (issecretvalue and issecretvalue(v)) end
@@ -77,7 +78,7 @@ broadcast=function(target)
     -- At most one 40-player snapshot and one pending refresh are retained.
     if sending then pendingBroadcast=true; refresh(); return end
     game.revision=(game.revision or 0)+1
-    send("STATE",target,game.id,game.revision,game.host,game.stake,game.bestOf,game.status,game.round,game.bout,game.winner or "",#players())
+    send("STATE",target,game.id,game.revision,game.host,game.stake,game.bestOf,game.status,game.round,game.bout,game.winner or "",#players(),game.createdAt or 0,game.generation or 0)
     for _,p in ipairs(players()) do send("PLAYER",target,game.id,game.revision,p.name,p.paid and 1 or 0,p.ready and 1 or 0,p.active and 1 or 0,p.points or 0,p.choice and 1 or 0,p.lastSign or "") end
     send("NOTICE",target,game.id,game.revision,(game.notice or ""):sub(1,165))
     for _,line in ipairs(game.history or {}) do send("HISTORY",target,game.id,game.revision,line:sub(1,165)) end
@@ -155,7 +156,10 @@ function R:Create(stake,bestOf)
         local ok,reason=GambleBankSecurity:RegisterWager(id,stake,stake); if not ok then printLine(tostring(reason)); return end
         local paid=GambleBankSecurity:RegisterDeposit(id,me(),stake); if not paid then printLine("Bankeinsatz konnte nicht gebucht werden."); return end
     end
-    game={id=id,createdAt=time(),host=me(),stake=stake,bestOf=bestOf,status="LOBBY",round=1,bout=1,players={},history={},revision=0}
+    GambleRPSDB=GambleRPSDB or {}; GambleRPSDB.generations=GambleRPSDB.generations or {}
+    local generation=math.max(time(),(GambleRPSDB.generations[me()] or 0)+1)
+    GambleRPSDB.generations[me()]=generation
+    game={id=id,createdAt=time(),generation=generation,host=me(),stake=stake,bestOf=bestOf,status="LOBBY",round=1,bout=1,players={},history={},revision=0}
     game.players[key(me())]={name=me(),paid=true,ready=true,active=true,points=0}
     broadcast(); if main then main.uiTab="RPS_DETAIL"; refresh() end
 end
@@ -173,7 +177,15 @@ function R:Cancel()
 end
 function R:SetMainController(controller) main=controller end
 function R:HideEmbedded() if view then view:Hide(); if view.paymentPopup then view.paymentPopup:Hide() end end end
-function R:ShowDetails() if main then main.uiTab="RPS_DETAIL"; main.frame:Show(); refresh() end end
+function R:RequestSync(force)
+    if host() then return end
+    local now=GetTime and GetTime() or time()
+    if not force and now-lastSync<5 then return end
+    lastSync=now
+    -- Query the current host, rather than continuing to display a saved snapshot forever.
+    send("HELLO",game and groupMember(game.host) and game.host or nil)
+end
+function R:ShowDetails() if main then main.uiTab="RPS_DETAIL"; main.frame:Show(); self:RequestSync(); refresh() end end
 function R:GetRunningCard()
     if not game or game.status=="CLOSED" then return end
     return {id=game.id,rps=true,mode="ROCK_PAPER_SCISSORS",host=game.host,createdAt=game.createdAt or 0,minimum=game.stake,locked=game.status~="LOBBY",title="Schere Stein Papier",context=game.status.." · Best of "..game.bestOf,result=game.status=="DONE" and {name=game.winner} or nil}
@@ -259,7 +271,7 @@ function R:RenderEmbedded(controller,config)
     view.meta:SetText("Pot: "..moneyText(pot()).."    Stake: "..moneyText(game.stake).."    Best of: "..game.bestOf.."    Runde: "..game.round.."    Players: "..#players())
     view.notice:SetText("|cff55ff55"..(game.status=="DONE" and ("GEWINNER: "..short(game.winner).." — Auszahlung: "..moneyText(pot())) or game.notice or game.status).."|r")
     view.join:SetShown(game.status=="LOBBY" and not p)
-    view.ready:SetShown(game.status=="LOBBY" and p~=nil); view.ready:SetEnabled(p and p.paid or false); view.ready:SetText(p and p.ready and "Nicht bereit" or "Ready")
+    view.ready:SetShown(game.status=="LOBBY" and p~=nil and not host()); view.ready:SetEnabled(p and p.paid or false); view.ready:SetText(p and p.ready and "Nicht bereit" or "Ready")
     view.start:SetShown(host() and game.status=="LOBBY")
     local canStart=#players()>=2; for _,player in ipairs(players()) do if not player.paid or not player.ready then canStart=false end end
     view.start:SetEnabled(canStart); view.start:SetText(canStart and "Start Game" or "Waiting for Ready & Payment")
@@ -315,10 +327,20 @@ local function receive(message,sender)
     if cmd=="JOIN" or cmd=="READY" or cmd=="PICK" then if game and game.id==id then R:Request(cmd,sender,p[3],p[4]) end; return end
     if cmd=="STATE" then
         if not same(sender,p[4]) or not rev or (game and game.id==id and rev<=(game.revision or 0)) then return end
-        if game and game.id~=id and game.status~="DONE" and game.status~="CANCELLED" and game.status~="CLOSED" then return end
+        local createdAt=tonumber(p[12]) or tonumber(tostring(id):match("^RPS%-(%d+)")) or 0
+        local generation=tonumber(p[13]) or createdAt
+        if game and game.id~=id then
+            if same(sender,game.host) then
+                local previous=game.generation or tonumber(tostring(game.id):match("^RPS%-(%d+)")) or game.createdAt or 0
+                -- A newer lobby from the same host supersedes a stale local game.
+                -- Delayed cancellation/closure messages from an older game cannot replace it.
+                if generation<previous then return end
+                if generation==previous and game.status~="DONE" and game.status~="CANCELLED" and game.status~="CLOSED" then return end
+            elseif game.status~="DONE" and game.status~="CANCELLED" and game.status~="CLOSED" then return end
+        end
         local stake,best,round,bout,count=tonumber(p[5]),tonumber(p[6]),tonumber(p[8]),tonumber(p[9]),tonumber(p[11])
         if not stake or stake<0 or not best or best<1 or best>15 or best%2~=1 or not round or not bout or not count or count<1 or count>40 then return end
-        incoming={id=id,revision=rev,host=p[4],stake=stake,bestOf=best,status=p[7],round=round,bout=bout,winner=p[10]~="" and p[10] or nil,players={},history={},expected=count,createdAt=time()}; return
+        incoming={id=id,revision=rev,host=p[4],stake=stake,bestOf=best,status=p[7],round=round,bout=bout,winner=p[10]~="" and p[10] or nil,players={},history={},expected=count,createdAt=createdAt,generation=generation}; return
     end
     if not incoming or incoming.id~=id or incoming.revision~=rev or not same(sender,incoming.host) then return end
     if cmd=="PLAYER" then incoming.players[key(p[4])]={name=p[4],paid=p[5]=="1",ready=p[6]=="1",active=p[7]=="1",points=tonumber(p[8]) or 0,chosen=p[9]=="1",lastSign=labels[p[10]] and p[10] or nil}
@@ -341,7 +363,7 @@ local function completeTrade()
     end
 end
 local frame=CreateFrame("Frame")
-for _,event in ipairs({"PLAYER_LOGIN","PLAYER_LOGOUT","CHAT_MSG_ADDON","GROUP_ROSTER_UPDATE","TRADE_SHOW","TRADE_MONEY_CHANGED","TRADE_ACCEPT_UPDATE","CHAT_MSG_SYSTEM","UI_INFO_MESSAGE","TRADE_CLOSED"}) do frame:RegisterEvent(event) end
+for _,event in ipairs({"PLAYER_LOGIN","PLAYER_LOGOUT","PLAYER_ENTERING_WORLD","CHAT_MSG_ADDON","GROUP_ROSTER_UPDATE","TRADE_SHOW","TRADE_MONEY_CHANGED","TRADE_ACCEPT_UPDATE","CHAT_MSG_SYSTEM","UI_INFO_MESSAGE","TRADE_CLOSED"}) do frame:RegisterEvent(event) end
 frame:SetScript("OnEvent",function(_,event,...)
     if event=="PLAYER_LOGIN" then
         GambleRPSDB=GambleRPSDB or {}; game=GambleRPSDB.characters and GambleRPSDB.characters[me()]
@@ -349,7 +371,7 @@ frame:SetScript("OnEvent",function(_,event,...)
         if host() then if game.status=="RUNNING" then settleBout() end; broadcast() else send("HELLO",nil) end
         return
     elseif event=="PLAYER_LOGOUT" then save()
-    elseif event=="GROUP_ROSTER_UPDATE" then send("HELLO",nil)
+    elseif event=="GROUP_ROSTER_UPDATE" or event=="PLAYER_ENTERING_WORLD" then if host() then broadcast() else R:RequestSync() end
     elseif event=="CHAT_MSG_ADDON" then local pre,msg,channel,sender=...; if pre==prefix then receive(msg,sender) end
     elseif event=="TRADE_SHOW" then
         trade=nil
@@ -362,4 +384,8 @@ frame:SetScript("OnEvent",function(_,event,...)
         local a,b=...; local msg=event=="UI_INFO_MESSAGE" and b or a
         if ERR_TRADE_COMPLETE and readable(msg) and msg==ERR_TRADE_COMPLETE then completeTrade() end
     elseif event=="TRADE_CLOSED" then local old=trade; if C_Timer then C_Timer.After(1,function() if trade==old then trade=nil end end) end end
+end)
+frame:SetScript("OnUpdate",function(_,elapsed)
+    syncElapsed=syncElapsed+elapsed; if syncElapsed<5 then return end; syncElapsed=0
+    if not host() and main and main.frame and main.frame:IsShown() and (main.uiTab=="RPS_DETAIL" or main.uiTab=="RUNNING") then R:RequestSync() end
 end)

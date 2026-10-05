@@ -2,7 +2,7 @@
 ## Title: Gamble
 ## Notes: Group betting games, boss predictions and manual gold settlements.
 ## Author: HanYokai
-## Version: 0.19.1
+## Version: 0.19.2
 ## SavedVariables: GambleDB, GambleDONDB, GambleBankSecurityDB, GambleRPSDB
 ## AllowLoadGameType: standard, camelot
 
