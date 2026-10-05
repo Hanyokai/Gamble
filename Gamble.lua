@@ -4,7 +4,7 @@ Gamble = Gamble or {}
 
 local PREFIX = "GambleFW1"
 local VERSION = 32
-local ADDON_VERSION = "0.19.0"
+local ADDON_VERSION = "0.19.1"
 local floor, max = math.floor, math.max
 local DEFAULT_MINIMAP_RADIUS = 104 -- Abstand vom Mittelpunkt; kann auch mit /gamble minimap ZAHL gesetzt werden.
 local DEFAULT_MINIMAP_ANGLE = 225 -- Winkel in Grad; optional mit /gamble minimap RADIUS WINKEL setzen.
@@ -1380,6 +1380,7 @@ function Gamble:CloseAuxiliaryWindows()
     end
     if GambleBankSecurity and GambleBankSecurity.frame then GambleBankSecurity.frame:Hide() end
     if GambleTestMode and GambleTestMode.frame then GambleTestMode.frame:Hide() end
+    if GambleRPS then GambleRPS:HideEmbedded() end
     if GambleDON and GambleDON.CloseWindows then
         if not GambleDON:CloseWindows() then self.pendingWindowClose = true end
     end
@@ -2724,6 +2725,7 @@ end
 function Gamble:Refresh()
     GambleDamageBets.main=self
     if not self.frame then return end
+    if GambleRPS then GambleRPS:SyncSettlement() end
     if GambleBankSecurity and GambleBankSecurity.GetOpenPayments then
         local don=GambleDON and GambleDON.GetRunningCard and GambleDON:GetRunningCard()
         for _,payment in ipairs(GambleBankSecurity:GetOpenPayments()) do
