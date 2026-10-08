@@ -4,7 +4,7 @@ Gamble = Gamble or {}
 
 local PREFIX = "GambleFW1"
 local VERSION = 32
-local ADDON_VERSION = "0.19.4"
+local ADDON_VERSION = "0.19.5"
 local floor, max = math.floor, math.max
 local DEFAULT_MINIMAP_RADIUS = 104 -- Abstand vom Mittelpunkt; kann auch mit /gamble minimap ZAHL gesetzt werden.
 local DEFAULT_MINIMAP_ANGLE = 225 -- Winkel in Grad; optional mit /gamble minimap RADIUS WINKEL setzen.
@@ -1228,7 +1228,12 @@ local function FinalizeCancel(fromHost)
     for sender, request in pairs(state.escrowRequests) do if request.id == a.id then state.escrowRequests[sender] = nil end end
     if state.tradeContext and state.tradeContext.request and state.tradeContext.request.id == a.id then state.tradeContext = nil end
     if Gamble.escrowFrame then Gamble.escrowFrame:Hide() end
+    local otherPayments = {}
+    for _, payment in ipairs(state.payments) do
+        if payment.wagerID ~= a.id then otherPayments[#otherPayments + 1] = payment end
+    end
     BuildPayments(nil, true)
+    for _, payment in ipairs(otherPayments) do state.payments[#state.payments + 1] = payment end
     if not fromHost and SamePlayer(a.host, PlayerName()) then Send("CANCEL_FINAL", a.id) end
     Gamble.uiTab = "NEW"; Gamble.detailWagerID = nil
     state.active = nil
@@ -3941,14 +3946,14 @@ function Gamble:OnAddonMessage(prefix, message, channel, sender)
             GambleDB.itemJackpots[ItemJackpotKey(a)] = tonumber(p[5]) or GambleDB.itemJackpots[ItemJackpotKey(a)] or 0
         end
     elseif command == "CANCEL_REQUEST" then
-        local a = state.active
-        if a and p[2] == a.id and SamePlayer(sender, a.host) and not a.locked and not a.result then
+        local a = FindWager(p[2])
+        if a and SamePlayer(sender, a.host) and (not a.locked or IsBossSeries(a.mode)) and not a.result then
             local participates = false
-            for _, bet in ipairs(OrderedBets()) do if SamePlayer(bet.bettor, PlayerName()) and not SamePlayer(bet.bettor, a.host) then participates = true; break end end
+            for _, bet in pairs(a.bets or {}) do if SamePlayer(bet.bettor, PlayerName()) and not SamePlayer(bet.bettor, a.host) then participates = true; break end end
             if participates then StaticPopup_Show("GAMBLE_CANCEL_REQUEST", DisplayName(sender), nil, a.id) end
         end
     elseif command == "CANCEL_VOTE" then
-        local a = state.active
+        local a = FindWager(p[2])
         if a and p[2] == a.id and a.cancelVote and SamePlayer(PlayerName(), a.host) then
             local voterKey
             for name in pairs(a.cancelVote.voters) do if SamePlayer(name, sender) then voterKey = name; break end end
@@ -3958,16 +3963,16 @@ function Gamble:OnAddonMessage(prefix, message, channel, sender)
                     Print(DisplayName(sender) .. " declined cancellation. The bet remains open."); self:Refresh()
                 else
                     a.cancelVote.voters[voterKey] = true; a.cancelVote.accepted = a.cancelVote.accepted + 1
-                    if a.cancelVote.accepted >= a.cancelVote.required then FinalizeCancel(false) else self:Refresh() end
+                    if a.cancelVote.accepted >= a.cancelVote.required then state.active = a; FinalizeCancel(false) else self:Refresh() end
                 end
             end
         end
     elseif command == "CANCEL_ABORT" then
-        local a = state.active
+        local a = FindWager(p[2])
         if a and p[2] == a.id and SamePlayer(sender, a.host) then StaticPopup_Hide("GAMBLE_CANCEL_REQUEST"); Print("Cancellation was not unanimous. The bet remains open.") end
     elseif command == "CANCEL_FINAL" then
-        local a = state.active
-        if a and p[2] == a.id and SamePlayer(sender, a.host) then StaticPopup_Hide("GAMBLE_CANCEL_REQUEST"); FinalizeCancel(true) end
+        local a = FindWager(p[2])
+        if a and p[2] == a.id and SamePlayer(sender, a.host) then StaticPopup_Hide("GAMBLE_CANCEL_REQUEST"); state.active = a; FinalizeCancel(true) end
     end
 end
 
