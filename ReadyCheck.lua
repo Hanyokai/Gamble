@@ -9,8 +9,15 @@ function Ready:IsPaid(wager,name,same)
     for _,bet in pairs(wager.bets or {}) do if same(bet.bettor,name) then return true end end
     return false
 end
+function Ready:HasPredictions(wager,name,same)
+    if wager.mode~="BOSS_DAMAGE_SERIES" then return true end
+    for _,bet in pairs(wager.bets or {}) do
+        if same(bet.bettor,name) then return GambleDamageBets:SeriesPicksComplete(wager,bet.picks) end
+    end
+    return false
+end
 function Ready:IsReady(wager,name,same)
-    if not self:IsPaid(wager,name,same) then return false end
+    if not self:IsPaid(wager,name,same) or not self:HasPredictions(wager,name,same) then return false end
     if same(wager.host,name) then return true end
     for player,value in pairs(wager.readyStatus or {}) do if same(player,name) then return value==true end end
     return false
@@ -29,7 +36,7 @@ function Ready:CountReady(wager,same)
 end
 function Ready:Set(wager,name,value,same)
     if wager.locked or wager.awaitingStart == false or wager.result or same(wager.host,name) then return false end
-    if not self:IsPaid(wager,name,same) then value=false end
+    if not self:IsPaid(wager,name,same) or not self:HasPredictions(wager,name,same) then value=false end
     wager.readyStatus=wager.readyStatus or {}
     for player in pairs(wager.readyStatus) do if same(player,name) then wager.readyStatus[player]=nil end end
     wager.readyStatus[name]=value==true
@@ -82,7 +89,12 @@ function Ready:Render(main,wager,visible,same,me,send)
         row:SetPoint("TOPLEFT",0,-((index-1)*38))
         row.name:SetText((name:match("^([^%-]+)") or name)..(same(name,wager.host) and " (Bank)" or ""))
         row.payment:SetText(paid and "|cff55ff55PAID|r" or "|cffff5555NOT PAID|r")
-        row.ready:SetText(self:IsReady(wager,name,same) and "|cff55ff55READY|r" or "|cffffcc55NOT READY|r")
+        row.ready:SetText(self:IsReady(wager,name,same) and "|cff55ff55READY|r" or (not self:HasPredictions(wager,name,same) and "|cffffcc55TIPPS FEHLEN|r" or "|cffffcc55NOT READY|r"))
+        if wager.result and wager.result.rankedDamage then
+            local score=(wager.rankScores or {})[name] or 0
+            local winner=not wager.result.void and score==(wager.rankBest or 0) and score>0
+            row.ready:SetText((winner and "|cff55ff55GEWINNER · " or "|cffffffff")..score.." Punkte|r")
+        end
         row:Show()
     end
     self.content:SetHeight(math.max(1,#names*38))
@@ -90,6 +102,6 @@ function Ready:Render(main,wager,visible,same,me,send)
     local involved=false; for _,name in ipairs(names) do if same(name,me) then involved=true end end
     if involved and not same(wager.host,me) and not wager.locked and wager.awaitingStart ~= false and not wager.result then
         self.toggle:SetText(self:IsReady(wager,me,same) and "Not Ready" or "Ready")
-        self.toggle:SetEnabled(self:IsPaid(wager,me,same)); self.toggle:Show()
+        self.toggle:SetEnabled(self:IsPaid(wager,me,same) and self:HasPredictions(wager,me,same)); self.toggle:Show()
     end
 end

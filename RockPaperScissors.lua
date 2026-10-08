@@ -7,6 +7,7 @@ local broadcast
 local outgoing,queueHead,sending={},1,false
 local pendingBroadcast=false
 local syncElapsed,lastSync=0,-10
+local invited={}
 local labels={R="Stein",P="Papier",S="Schere"}
 local beats={R="S",P="R",S="P"}
 local function readable(v) return not (canaccessvalue and not canaccessvalue(v)) and not (issecretvalue and issecretvalue(v)) end
@@ -183,9 +184,19 @@ function R:RequestSync(force)
     if not force and now-lastSync<5 then return end
     lastSync=now
     -- Query the current host, rather than continuing to display a saved snapshot forever.
-    send("HELLO",game and groupMember(game.host) and game.host or nil)
+    send("HELLO",nil)
 end
 function R:ShowDetails() if main then main.uiTab="RPS_DETAIL"; main.frame:Show(); self:RequestSync(); refresh() end end
+function R:ShowInvitation()
+    if not game or game.status~="LOBBY" or host() or own() or invited[game.id] then return end
+    if GambleDB and GambleDB.settings and GambleDB.settings.autoWagerPopup==false then return end
+    if not StaticPopupDialogs or not StaticPopup_Show then return end
+    invited[game.id]=true
+    StaticPopupDialogs.GAMBLE_RPS_INVITE={text="%s eröffnet Schere Stein Papier!\nBest of %s\nLobby öffnen?",
+        button1="Lobby öffnen",button2="Später",timeout=0,whileDead=true,hideOnEscape=true,preferredIndex=3,
+        OnAccept=function(_,data) if game and game.id==data then R:ShowDetails() end end}
+    StaticPopup_Show("GAMBLE_RPS_INVITE",short(game.host),game.bestOf,game.id)
+end
 function R:GetRunningCard()
     if not game or game.status=="CLOSED" then return end
     return {id=game.id,rps=true,mode="ROCK_PAPER_SCISSORS",host=game.host,createdAt=game.createdAt or 0,minimum=game.stake,locked=game.status~="LOBBY",title="Schere Stein Papier",context=game.status.." · Best of "..game.bestOf,result=game.status=="DONE" and {name=game.winner} or nil}
@@ -222,6 +233,11 @@ function R:RenderEmbedded(controller,config)
         view.pay=button(view.play,"Einsatz zahlen",0,-192,function() end,true)
         GambleTradeAction:Attach(view.pay,function() if game and game.status=="LOBBY" and own() and not own().paid then return {name=game.host,prepare=function() printLine("Einsatz: "..game.stake.." Kupfer. Gold im Handel manuell eintragen.") end} end end,printLine)
         view.cancel=button(view.play,"Abbrechen",290,-192,function() R:Cancel() end)
+        view.cancel:SetText(""); view.cancel:SetSize(28,28)
+        local cancelIcon=view.cancel:CreateTexture(nil,"ARTWORK")
+        cancelIcon:SetAllPoints(); cancelIcon:SetAtlas("128-RedButton-Delete",false)
+        view.cancel:SetScript("OnEnter",function(b) if GameTooltip then GameTooltip:SetOwner(b,"ANCHOR_RIGHT"); GameTooltip:SetText("Spiel abbrechen"); GameTooltip:Show() end end)
+        view.cancel:SetScript("OnLeave",function() if GameTooltip then GameTooltip:Hide() end end)
         view.payout=button(view.play,"Pay Winner",145,-192,function() end,true)
         GambleTradeAction:Attach(view.payout,function()
             local payment=R:GetPendingPayment()
@@ -336,7 +352,10 @@ local function receive(message,sender)
                 -- Delayed cancellation/closure messages from an older game cannot replace it.
                 if generation<previous then return end
                 if generation==previous and game.status~="DONE" and game.status~="CANCELLED" and game.status~="CLOSED" then return end
-            elseif game.status~="DONE" and game.status~="CANCELLED" and game.status~="CLOSED" then return end
+            elseif game.status~="DONE" and game.status~="CANCELLED" and game.status~="CLOSED" then
+                -- Do not let a stale game from an absent host hide the current group's lobby.
+                if host() or groupMember(game.host) then return end
+            end
         end
         local stake,best,round,bout,count=tonumber(p[5]),tonumber(p[6]),tonumber(p[8]),tonumber(p[9]),tonumber(p[11])
         if not stake or stake<0 or not best or best<1 or best>15 or best%2~=1 or not round or not bout or not count or count<1 or count>40 then return end
@@ -348,7 +367,7 @@ local function receive(message,sender)
     elseif cmd=="HISTORY" then if #incoming.history<15 then incoming.history[#incoming.history+1]=p[4] end
     elseif cmd=="END" then
         local n=0; for _ in pairs(incoming.players) do n=n+1 end
-        if n==incoming.expected then game=incoming; incoming=nil; if game.status=="CLOSED" then returnToNew() end; refresh() end
+        if n==incoming.expected then game=incoming; incoming=nil; if game.status=="CLOSED" then returnToNew() end; refresh(); R:ShowInvitation() end
     end
 end
 local function money()

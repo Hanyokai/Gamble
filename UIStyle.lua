@@ -15,16 +15,19 @@ local function Outline(owner)
         local selected=owner.selection and owner.selection:IsShown()
         local active=owner.gambleStyled and owner:IsEnabled()
         local rank=owner.gambleRankPlace
-        local state=(selected and "selected" or active and (hover and "activeHover" or "active") or hover and "hover" or "idle")..":"..tostring(rank or "")
+        local betActive=owner.gambleBetActive==true
+        local state=(selected and "selected" or active and (hover and "activeHover" or "active") or hover and "hover" or "idle")..":"..tostring(rank or "")..":"..tostring(betActive)
         if state==lastState then return end
         lastState=state
-        if rank==1 then border:SetBackdropBorderColor(.2,1,.2,1)
+        if betActive then border:SetBackdropBorderColor(.2,1,.2,1)
+        elseif rank==1 then border:SetBackdropBorderColor(.2,1,.2,1)
         elseif rank==2 then border:SetBackdropBorderColor(1,.85,.1,1)
         elseif rank==3 then border:SetBackdropBorderColor(1,.2,.2,1)
         elseif selected then border:SetBackdropBorderColor(.2,1,.2,1)
         elseif active or hover then border:SetBackdropBorderColor(1,.68,.05,1)
         else border:SetBackdropBorderColor(.38,.38,.38,1) end
-        if active then border:SetBackdropColor(hover and .55 or .38,.025,.025,.98)
+        if betActive then border:SetBackdropColor(.035,.32,.06,.98)
+        elseif active then border:SetBackdropColor(hover and .55 or .38,.025,.025,.98)
         else border:SetBackdropColor(.08,.08,.08,.98) end
     end
     -- Disabled buttons do not reliably fire OnEnter. Only visible borders poll.
@@ -45,10 +48,16 @@ function Style:Button(button)
         if texture then texture:SetAlpha(0) end
     end
     local border=Outline(button)
+    button.gambleStyleBorder=border
     local function update()
         border.UpdateStyle()
     end
     button:HookScript("OnEnable",update); button:HookScript("OnDisable",update); update()
+end
+function Style:SetBetActive(button,active)
+    if not button then return end
+    button.gambleBetActive=active==true
+    if button.gambleStyleBorder then button.gambleStyleBorder.UpdateStyle() end
 end
 function Style:Row(row)
     if row.gambleRowStyled then return end

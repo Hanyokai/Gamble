@@ -4,7 +4,7 @@ Gamble = Gamble or {}
 
 local PREFIX = "GambleFW1"
 local VERSION = 32
-local ADDON_VERSION = "0.19.5"
+local ADDON_VERSION = "0.19.11"
 local floor, max = math.floor, math.max
 local DEFAULT_MINIMAP_RADIUS = 104 -- Abstand vom Mittelpunkt; kann auch mit /gamble minimap ZAHL gesetzt werden.
 local DEFAULT_MINIMAP_ANGLE = 225 -- Winkel in Grad; optional mit /gamble minimap RADIUS WINKEL setzen.
@@ -1476,6 +1476,17 @@ function Gamble:FinishRankDamage(a,invalid,reason,fromHost)
     end
     if refund and (SamePlayer(a.host,PlayerName()) or OwnBet(a)) then
         self.damageResultNotice={id=a.id,headline=invalid and "Damage Race cancelled" or "Nobody predicted correctly",detail=a.result.name,topDamage=""}
+    elseif not refund and not SamePlayer(a.host,PlayerName()) and OwnBet(a) then
+        local names,amounts={},{}
+        for name,amount in pairs(a.rankPayouts or {}) do
+            if amount>0 then
+                names[#names+1]=DisplayName(name)
+                amounts[#amounts+1]=DisplayName(name)..": "..Money(amount)
+            end
+        end
+        table.sort(names); table.sort(amounts)
+        self.damageResultNotice={id=a.id,winner=true,headline="Winner — "..(a.rankBest or 0).." points",
+            detail=table.concat(names,", "),topDamage=table.concat(amounts,"\n")}
     end
     Print(a.result.name); state.active=selected; SaveSession(); self:Refresh()
 end
@@ -1522,6 +1533,10 @@ function Gamble:CanStartDamageRace(a)
     for _,bet in pairs(a.bets or {}) do if not GambleDamageBets:Valid(a,bet.targetGUID) then return false end end
     return GambleReadyCheck and GambleReadyCheck:CountReady(a, SamePlayer) >= 2
 end
+function Gamble:BossNeedsSeriesPrediction(a,index)
+    local boss=a.bosses and a.bosses[index]
+    return boss and not boss.defeated and not (a.seriesResults or {})[index] and not (a.rankResults or {})[index] and not IsBossDefeated(a.instanceName,boss.name,boss.encounterID)
+end
 function Gamble:CanStartBet(a)
     if not a or a.setupPending or a.result or a.cancelVote or #PendingPaymentNames(a)>0 or not GambleReadyCheck then return false end
     local count=0
@@ -1530,10 +1545,7 @@ function Gamble:CanStartBet(a)
         if a.mode=="BOSS_SERIES" and not SeriesPicksComplete(bet.picks or {},a.bosses) then return false end
         if a.mode=="DAMAGE_RACE" and not GambleDamageBets:Valid(a,bet.targetGUID) then return false end
         if a.mode=="BOSS_DAMAGE_SERIES" then
-            for i=1,#a.bosses do
-                local pick=bet.picks and bet.picks[i]
-                if pick and pick.guid~="RANK_PENDING" and not GambleDamageBets:Valid(a,pick.guid) then return false end
-            end
+            if not GambleDamageBets:SeriesPicksComplete(a,bet.picks) then return false end
         end
         count=count+1
     end
@@ -1543,6 +1555,7 @@ function Gamble:StartReadyBet(a, automatic)
     if not a or not a.awaitingStart or a.setupPending or a.result or a.cancelVote or not SamePlayer(a.host,PlayerName()) then return end
     if automatic and a.mode=="BOSS_DAMAGE_SERIES" then return end
     if automatic and not self:CanStartBet(a) then return end
+    if a.mode=="BOSS_DAMAGE_SERIES" and not self:CanStartBet(a) then return end
     if not GambleReadyCheck or GambleReadyCheck:CountReady(a,SamePlayer)<2 then return end
     if a.mode=="BOSS_DAMAGE_SERIES" then
         if GambleDamageRace:InCombat() then
@@ -1963,7 +1976,8 @@ end
 local function WinnerEntries(a)
     local entries, payouts = {}, nil
     if not a or not a.result or a.result.void or a.result.itemMiss then return entries end
-    if a.result.lms then payouts = a.lmsPayouts
+    if a.result.rankedDamage then payouts = a.rankPayouts
+    elseif a.result.lms then payouts = a.lmsPayouts
     elseif a.result.series then payouts = a.seriesPayouts
     elseif a.result.item then payouts = a.itemPayouts
     else local _, _, computed = ComputeResult(a.result.guid, a); payouts = computed end
@@ -1993,11 +2007,11 @@ function Gamble:RefreshWinnerPopup()
         self.damageResultNotice = nil
         self.winnerFrame.payment = nil
         self.winnerFrame.finalWagerID = damageNotice.id
-        self.winnerFrame.noticeKey = "DAMAGE_REFUND:" .. damageNotice.id
+        self.winnerFrame.noticeKey = (damageNotice.winner and "DAMAGE_WINNER:" or "DAMAGE_REFUND:") .. damageNotice.id
         self.winnerFrame.TitleText:SetText("Gamble - Damage Race Result")
         self.winnerHeadline:SetText(damageNotice.headline)
         self.winnerName:SetText(damageNotice.detail)
-        self.winnerAmount:SetText(damageNotice.topDamage .. "\nAll stakes will be refunded.")
+        self.winnerAmount:SetText(damageNotice.topDamage .. (damageNotice.winner and "" or "\nAll stakes will be refunded."))
         self.winnerTradeButton:Hide()
         self.winnerFrame:Show(); self.winnerFrame:Raise()
         return
@@ -2490,6 +2504,8 @@ end
 function Gamble:RefreshSeriesPopup()
     if not self.seriesPopup or not self.seriesPopup:IsShown() then return end
     local bosses = state.active and IsBossSeries(state.active.mode) and state.active.bosses or state.bosses
+    local showResults=state.active and state.active.mode=="BOSS_DAMAGE_SERIES" and state.active.result
+    local rowHeight=showResults and 58 or 40
     for _, row in ipairs(self.seriesPopupRows) do row:Hide() end
     for index, boss in ipairs(bosses or {}) do
         local row = self.seriesPopupRows[index]
@@ -2499,6 +2515,8 @@ function Gamble:RefreshSeriesPopup()
             row.bg = row:CreateTexture(nil, "BACKGROUND"); row.bg:SetAllPoints(); row.bg:SetColorTexture(.08, .08, .08, .86)
             row.boss = row:CreateFontString(nil, "OVERLAY", "GameFontNormal"); row.boss:SetPoint("TOPLEFT", 8, -5); row.boss:SetPoint("TOPRIGHT", -8, -5); row.boss:SetJustifyH("LEFT")
             row.pick = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"); row.pick:SetPoint("TOPLEFT", 8, -21); row.pick:SetPoint("TOPRIGHT", -8, -21); row.pick:SetJustifyH("LEFT")
+            row.actual = row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+            row.actual:SetPoint("TOPLEFT",8,-37); row.actual:SetPoint("TOPRIGHT",-8,-37); row.actual:SetJustifyH("LEFT")
             row.rareIcon = row:CreateTexture(nil, "OVERLAY")
             row.rareIcon:SetSize(28, 28); row.rareIcon:SetPoint("LEFT", 2, 0)
             row.rareIcon:SetAtlas("ui-hud-unitframe-target-portraiton-boss-rare-silver")
@@ -2516,7 +2534,9 @@ function Gamble:RefreshSeriesPopup()
         local running = state.active and state.active.currentSeriesBoss == index
         local locked = down or running
         row.bossIndex, row.locked = index, locked and true or false
-        row:ClearAllPoints(); row:SetPoint("TOPLEFT", 0, -((index - 1) * 40))
+        row:ClearAllPoints(); row:SetPoint("TOPLEFT", 0, -((index - 1) * rowHeight)); row:SetHeight(rowHeight-4)
+        row.actual:SetShown(not not showResults)
+        if showResults then row.actual:SetText(GambleDamageBets:BossResultText(state.active,index)) end
         local rare = GambleData.IsRareBoss(boss)
         row.rareIcon:SetShown(rare)
         row.boss:ClearAllPoints(); row.boss:SetPoint("TOPLEFT", rare and 34 or 8, -5); row.boss:SetPoint("TOPRIGHT", -8, -5)
@@ -2528,14 +2548,15 @@ function Gamble:RefreshSeriesPopup()
             local names={}
             for place,guid in ipairs(GambleDamageBets:Decode(pick.guid)) do
                 local member = (state.active.snapshot or {})[guid] or FindRosterByGUID(guid)
-                names[#names+1]=place..". "..DisplayName(member and member.name or "Unbekannter Spieler")
+                local name=DisplayName(member and member.name or "Unbekannter Spieler")
+                names[#names+1]=place..". "..GambleDamageBets:PredictionName(state.active,index,place,guid,name)
             end
             row.pick:SetText(#names>0 and table.concat(names," / ") or "|cffff5555Noch kein Tipp – Auswahl vor dem Boss-Pull|r")
         end
         row.bg:SetColorTexture(index == state.seriesStep and .22 or .08, index == state.seriesStep and .17 or .08, .04, .9)
         row:Show()
     end
-    self.seriesPopupContent:SetHeight(max(1, #(bosses or {}) * 40))
+    self.seriesPopupContent:SetHeight(max(1, #(bosses or {}) * rowHeight))
 end
 
 function Gamble:UpdateUnstartedSeries()
@@ -2734,6 +2755,7 @@ end
 function Gamble:Refresh()
     GambleDamageBets.main=self
     if not self.frame then return end
+    if GambleUIStyle then GambleUIStyle:SetBetActive(self.actionButton,false) end
     if self.finishSeriesButton then self.finishSeriesButton:Hide() end
     if GambleRPS then GambleRPS:SyncSettlement() end
     if GambleBankSecurity and GambleBankSecurity.GetOpenPayments then
@@ -2818,7 +2840,7 @@ function Gamble:Refresh()
     local itemMode = a and a.mode == "ITEM_DROP"
     local seriesEditing = (a and IsBossSeries(a.mode) and not a.result) and true or false
     local seriesBosses = a and IsBossSeries(a.mode) and a.bosses or state.bosses
-    self:RefreshSeriesSummary(seriesEditing, seriesBosses)
+    self:RefreshSeriesSummary(seriesEditing or (a and a.mode=="BOSS_DAMAGE_SERIES" and a.result and not a.result.cancelled), seriesBosses)
     self.previousBossButton:SetShown(seriesEditing); self.nextBossButton:SetShown(seriesEditing)
     if seriesEditing then
         if state.seriesStep > 1 then self.previousBossButton:Enable() else self.previousBossButton:Disable() end
@@ -2911,6 +2933,7 @@ function Gamble:Refresh()
             self.status:SetText(IsBossSeries(a.mode) and ("Boss series in progress – " .. (a.completedBosses or 0) .. "/" .. #a.bosses .. " scored.") or (((a.mode == "NEXT_BOSS" or a.mode == "LAST_MAN_STANDING" or a.mode == "ITEM_DROP") and ("Boss encounter " .. (a.encounterName or a.bossName or "") .. " in progress") or "Pull in progress") .. " – Betting closed."))
         end
         self.actionButton:SetText("Bet in Progress"); self.actionButton:Disable()
+        if GambleUIStyle then GambleUIStyle:SetBetActive(self.actionButton,true) end
     else
         if IsBossSeries(a.mode) then
             local boss = a.bosses[state.seriesStep]
@@ -2953,10 +2976,12 @@ function Gamble:Refresh()
     end
     if a.awaitingStart and SamePlayer(a.host,PlayerName()) and a.mode~="DAMAGE_RACE" and not a.result then
         local canStart=not a.setupPending and GambleReadyCheck:CountReady(a,SamePlayer)>=2
+        if a.mode=="BOSS_DAMAGE_SERIES" then canStart=self:CanStartBet(a) end
         self.actionButton:Show(); self.actionButton:SetText(canStart and (a.mode=="BOSS_DAMAGE_SERIES" and "Boss-Serie freigeben" or "Start with Ready Players") or "Waiting for Ready & Payment"); self.actionButton:SetEnabled(canStart)
     end
     if a.awaitingStart == false and not a.result and a.mode~="DAMAGE_RACE" then
         self.actionButton:Show(); self.actionButton:SetText(a.mode=="BOSS_DAMAGE_SERIES" and a.rankAwaitingFinish and "Waiting for Host Decision" or "Bet Active"); self.actionButton:Disable()
+        if GambleUIStyle then GambleUIStyle:SetBetActive(self.actionButton,true) end
     end
     local lines = {}
     local paymentPlayers, paymentByKey = {}, {}

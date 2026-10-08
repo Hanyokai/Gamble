@@ -44,6 +44,38 @@ end
 function B:BossPickLocked(a,index)
     return a.result or (a.rankResults or {})[index] or (a.rankBossLocks or {})[index] or a.currentSeriesBoss==index or self.jobs[a.id] and self.jobs[a.id].index==index
 end
+function B:SeriesPicksComplete(a,picks)
+    for index,boss in ipairs(a.bosses or {}) do
+        local required=not boss.defeated and not (a.seriesResults or {})[index] and not (a.rankResults or {})[index]
+        if required and self.main and self.main.BossNeedsSeriesPrediction then required=self.main:BossNeedsSeriesPrediction(a,index) end
+        if required and not self:Valid(a,picks and picks[index] and picks[index].guid) then return false end
+    end
+    return true
+end
+function B:PredictionName(a,index,place,guid,name)
+    local ranking=(a.rankResults or {})[index]
+    local result=(a.seriesResults or {})[index]
+    if not ranking or not next(ranking) or (result and result.name=="Not scored") then return name end
+    local correct=ranking[place] and ranking[place][guid]
+    return (correct and "|cff55ff55" or "|cffff5555")..name.."|r"
+end
+function B:BossResultText(a,index)
+    local result=(a.seriesResults or {})[index]
+    local ranking=(a.rankResults or {})[index]
+    if result and result.name=="Not scored" then return "|cffaaaaaaErgebnis nicht auswertbar|r" end
+    if not ranking or not next(ranking) then return "|cffaaaaaaKein Ergebnis|r" end
+    local places={}
+    for place=1,3 do
+        local names={}
+        for guid in pairs(ranking[place] or {}) do
+            local member=(a.snapshot or {})[guid]
+            names[#names+1]=member and (member.name:match("^([^%-]+)") or member.name) or "Unbekannter Spieler"
+        end
+        table.sort(names)
+        if #names>0 then places[#places+1]=place..". "..table.concat(names,", ") end
+    end
+    return "|cff55ff55Top: "..table.concat(places," / ").."|r"
+end
 local function TargetReadable(value)
     return not (canaccessvalue and not canaccessvalue(value)) and not (issecretvalue and issecretvalue(value))
 end
@@ -187,7 +219,7 @@ function B:Choose(main,state,member)
     state.selectedGUID,state.selectedName=token,"Top 3"
     if a.mode=="BOSS_DAMAGE_SERIES" then
         state.seriesPicks[index]=token and {guid=token,name="Top 3"} or nil
-        if token and a.awaitingStart==false then main:SubmitBossRankPick(a,index,token) end
+        if token and main:GetOwnRankBet(a) then main:SubmitBossRankPick(a,index,token) end
     end
     self.slot=slot%self:Places(a)+1
     return true
