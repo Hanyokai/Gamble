@@ -4,7 +4,7 @@ Gamble = Gamble or {}
 
 local PREFIX = "GambleFW1"
 local VERSION = 32
-local ADDON_VERSION = "0.19.3"
+local ADDON_VERSION = "0.19.4"
 local floor, max = math.floor, math.max
 local DEFAULT_MINIMAP_RADIUS = 104 -- Abstand vom Mittelpunkt; kann auch mit /gamble minimap ZAHL gesetzt werden.
 local DEFAULT_MINIMAP_ANGLE = 225 -- Winkel in Grad; optional mit /gamble minimap RADIUS WINKEL setzen.
@@ -1805,8 +1805,12 @@ function Gamble:CreateUI()
     end)
     cancel:SetScript("OnLeave", function() GameTooltip:Hide() end)
     cancel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -18, 16); cancel:SetScript("OnClick", function()
-        if state.active and IsBossSeries(state.active.mode) and state.active.locked then FinalizeSeries() else Gamble:RequestCancel() end
+        Gamble:RequestCancel()
     end); cancel:Hide(); self.cancelButton = cancel
+    local finishSeries = MakeButton(f, 110, 24, "Finish Series")
+    finishSeries:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -56, 16)
+    finishSeries:SetScript("OnClick", function() FinalizeSeries() end)
+    finishSeries:Hide(); self.finishSeriesButton = finishSeries
 
     local winner = CreateFrame("Frame", "GambleWinnerFrame", UIParent, "BasicFrameTemplateWithInset")
     winner:SetSize(390, 205); winner:SetPoint("TOP", UIParent, "TOP", 0, -60)
@@ -2725,6 +2729,7 @@ end
 function Gamble:Refresh()
     GambleDamageBets.main=self
     if not self.frame then return end
+    if self.finishSeriesButton then self.finishSeriesButton:Hide() end
     if GambleRPS then GambleRPS:SyncSettlement() end
     if GambleBankSecurity and GambleBankSecurity.GetOpenPayments then
         local don=GambleDON and GambleDON.GetRunningCard and GambleDON:GetRunningCard()
@@ -2826,9 +2831,8 @@ function Gamble:Refresh()
     self.actionButton:SetShown(configured and true or false)
     local canFinishSeries = a and IsBossSeries(a.mode) and a.locked and not a.result and SamePlayer(a.host, PlayerName())
     self.cancelButton:SetShown(a and SamePlayer(a.host, PlayerName()) and not a.result and (not a.locked or canFinishSeries))
-    if canFinishSeries then self.cancelButton:Enable(); self.cancelButton:SetText("Finish Series")
-    elseif a and a.cancelVote then self.cancelButton:Disable(); self.cancelButton:SetText("Awaiting Approval")
-    else self.cancelButton:Enable(); self.cancelButton:SetText("Cancel Bet") end
+    self.cancelButton:Enable(); self.cancelButton:SetText(a and a.cancelVote and "Withdraw cancellation request" or "Cancel Bet")
+    if self.finishSeriesButton then self.finishSeriesButton:SetShown(canFinishSeries and not a.cancelVote or false) end
     if not a then
         if not state.selectedType then
             self.status:SetText("Search above and select a bet type.")
@@ -3225,7 +3229,7 @@ end
 function Gamble:BeginCancel(wager)
     local a = wager or state.active
     if a then state.active = a end
-    if not a or a.result or a.locked then Print("This bet can no longer be cancelled."); return end
+    if not a or a.result or (a.locked and not IsBossSeries(a.mode)) then Print("This bet can no longer be cancelled."); return end
     if not SamePlayer(a.host, PlayerName()) then Print("Only the bank can request cancellation."); return end
     if a.cancelVote then Print("Participant approval is already being requested."); return end
     local voters = {}
@@ -3242,9 +3246,13 @@ end
 
 function Gamble:RequestCancel()
     local a = state.active
-    if not a or a.result or a.locked then Print("This bet can no longer be cancelled."); return end
+    if not a or a.result or (a.locked and not IsBossSeries(a.mode)) then Print("This bet can no longer be cancelled."); return end
     if not SamePlayer(a.host, PlayerName()) then Print("Only the bank can request cancellation."); return end
-    if a.cancelVote then Print("Participant approval is already being requested."); return end
+    if a.cancelVote then
+        a.cancelVote = nil; Send("CANCEL_ABORT", a.id)
+        Print("Cancellation request withdrawn. The bet remains open; you can request cancellation again.")
+        self:Refresh(); return
+    end
     StaticPopup_Show("GAMBLE_CANCEL_CONFIRM", nil, nil, a.id)
 end
 
