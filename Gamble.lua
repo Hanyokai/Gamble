@@ -4,7 +4,7 @@ Gamble = Gamble or {}
 
 local PREFIX = "GambleFW1"
 local VERSION = 32
-local ADDON_VERSION = "0.19.2"
+local ADDON_VERSION = "0.19.3"
 local floor, max = math.floor, math.max
 local DEFAULT_MINIMAP_RADIUS = 104 -- Abstand vom Mittelpunkt; kann auch mit /gamble minimap ZAHL gesetzt werden.
 local DEFAULT_MINIMAP_ANGLE = 225 -- Winkel in Grad; optional mit /gamble minimap RADIUS WINKEL setzen.
@@ -3326,18 +3326,21 @@ local function ReadTargetTradeMoney()
     amount = tonumber(amount)
     if not amount then return nil end
     amount = floor(amount)
-    return amount > 0 and amount or nil
+    return amount >= 0 and amount or nil
 end
 
 function Gamble:CompleteEscrowTrade()
     local context = state.tradeContext
-    if not context or context.direction ~= "incoming" then return end
+    if not context or context.direction ~= "incoming" or context.settled then return end
     local request = context.request
+    if request and request.paymentProcessed then return end
     local a = request and FindWager(request.id)
     if not a or not SamePlayer(a.host, PlayerName()) then return end
     state.active = a
     local freshlyRead = ReadTargetTradeMoney()
-    if freshlyRead then context.offered = freshlyRead; context.moneyReadable = true end
+    -- The trade APIs commonly reset to zero after a successful close. Keep the
+    -- last live amount; live MONEY_CHANGED events still record a genuine zero.
+    if freshlyRead and freshlyRead > 0 then context.offered = freshlyRead; context.moneyReadable = true end
     local actualStake = context.moneyReadable and floor(context.offered or 0) or floor(request.stake)
     if context.moneyReadable and actualStake < request.stake then
         Print("The trade from " .. request.bettor .. " contained insufficient gold; the prediction was not activated.")
@@ -3358,6 +3361,7 @@ function Gamble:CompleteEscrowTrade()
         end
     end
     if (a.locked and not IsBossSeries(a.mode)) or a.result or a.cancelVote then
+        context.settled, request.paymentProcessed = true, true
         state.payments[#state.payments + 1] = { name = request.bettor, amount = actualStake, reason = "Too late – Refund" }
         ClearPaymentStatus(a, request.bettor); Send("PAYMENT_STATUS", a.id, request.bettor, "CANCELLED")
         state.escrowRequests[context.sender] = nil
@@ -3368,6 +3372,7 @@ function Gamble:CompleteEscrowTrade()
     local finalStake = (previousBet and floor(previousBet.stake or 0) or 0) + actualStake
     local added = request.picks and AddSeriesBet(request.bettor, request.picks, finalStake) or AddBet(request.bettor, request.targetGUID, request.targetName, finalStake)
     if added then
+        context.settled, request.paymentProcessed = true, true
         SetPaymentStatus(a, request.bettor, "PAID")
         Send("PAYMENT_STATUS", a.id, request.bettor, "PAID")
         if request.picks then
@@ -3378,6 +3383,7 @@ function Gamble:CompleteEscrowTrade()
         Print("Stake received: " .. request.bettor .. " now participates with a total stake of " .. Money(finalStake) .. ".")
         self:Refresh()
     else
+        context.settled, request.paymentProcessed = true, true
         state.payments[#state.payments + 1] = { name = request.bettor, amount = actualStake, reason = IsBossSeries(a.mode) and "Incomplete boss predictions – Refund" or "Item already assigned – Refund" }
         ClearPaymentStatus(a, request.bettor); Send("PAYMENT_STATUS", a.id, request.bettor, "CANCELLED")
         state.escrowRequests[context.sender] = nil
@@ -3388,6 +3394,15 @@ function Gamble:CompleteEscrowTrade()
         end
         self:Refresh()
     end
+end
+
+function Gamble:BindEscrowTrade(sender, request)
+    local context = state.tradeContext
+    local wager = request and FindWager(request.id)
+    if not context or context.direction ~= "unassigned" or not wager or not SamePlayer(wager.host, PlayerName()) then return end
+    if not SamePlayer(context.partner, sender) then return end
+    context.direction, context.sender, context.request = "incoming", sender, request
+    if context.confirmed then self:CompleteEscrowTrade() end
 end
 
 function Gamble:CompletePayoutTrade()
@@ -3721,7 +3736,7 @@ function Gamble:OnAddonMessage(prefix, message, channel, sender)
             self:Refresh()
         end
     elseif command == "SERIES_JOIN_BEGIN" then
-        local a, totalStake, additionalStake, count = state.active, tonumber(p[3]), tonumber(p[4]), tonumber(p[5])
+        local a, totalStake, additionalStake, count = FindWager(p[2]), tonumber(p[3]), tonumber(p[4]), tonumber(p[5])
         local _, oldBet = FindBetKey(a, sender)
         -- The participant retries its predictions after trade completion. An
         -- already booked deposit must not become pending or be booked twice.
@@ -3740,6 +3755,7 @@ function Gamble:OnAddonMessage(prefix, message, channel, sender)
                 if not existing or existing.id ~= a.id or existing.totalStake ~= floor(totalStake) then
                     state.escrowRequests[sender] = { bettor = sender, stake = floor(additionalStake), totalStake = floor(totalStake), id = a.id, picks = {}, expected = count }
                 end
+                self:BindEscrowTrade(sender, state.escrowRequests[sender])
             end
             self:Refresh()
         end
@@ -3752,7 +3768,7 @@ function Gamble:OnAddonMessage(prefix, message, channel, sender)
                 for i = 1, request.expected do if not request.picks[i] then complete = false; break end end
                 if complete then
                     local previousContext = state.tradeContext
-                    state.tradeContext = { direction = "incoming", sender = sender, request = request, offered = request.receivedStake, moneyReadable = true }
+                    state.tradeContext = { direction = "incoming", sender = sender, request = request, offered = request.receivedStake, moneyReadable = true, confirmed = true }
                     self:CompleteEscrowTrade()
                     state.tradeContext = previousContext
                 end
@@ -4234,6 +4250,9 @@ function Gamble:OnEvent(event, ...)
             end
         end
         if not state.tradeContext then
+            if recipient and CanRead(recipient) then
+                state.tradeContext = { direction = "unassigned", partner = recipient, offered = 0 }
+            end
             Print("Trade partner: " .. tostring(recipient or "unavailable") .. ". No matching pending bet payment was found. Join the bet before trading.")
         end
     elseif event == "TRADE_MONEY_CHANGED" or event == "TRADE_ACCEPT_UPDATE" then
@@ -4246,13 +4265,15 @@ function Gamble:OnEvent(event, ...)
                 else state.tradeContext.moneyReadable=nil end
             end
         end
-        if state.tradeContext and state.tradeContext.direction == "incoming" then
+        if state.tradeContext and (state.tradeContext.direction == "incoming" or state.tradeContext.direction == "unassigned") then
             local amount = ReadTargetTradeMoney()
             if amount then state.tradeContext.offered = amount; state.tradeContext.moneyReadable = true end
         end
         if state.tradeContext and event == "TRADE_ACCEPT_UPDATE" then
             local playerAccepted, targetAccepted = ...
-            if CanRead(playerAccepted) and CanRead(targetAccepted) and playerAccepted == 1 and targetAccepted == 1 then state.tradeContext.bothAccepted = true end
+            if CanRead(playerAccepted) and CanRead(targetAccepted) then
+                state.tradeContext.bothAccepted = (playerAccepted == 1 or playerAccepted == true) and (targetAccepted == 1 or targetAccepted == true)
+            end
         end
     elseif event == "UI_INFO_MESSAGE" or event == "CHAT_MSG_SYSTEM" then
         local arg1, arg2 = ...
@@ -4262,13 +4283,16 @@ function Gamble:OnEvent(event, ...)
         if self:HandleInstanceResetMessage(message) then return end
         if message and ERR_TRADE_COMPLETE and message == ERR_TRADE_COMPLETE then
             local completedContext = state.tradeContext
+            if completedContext then completedContext.confirmed = true end
             if state.tradeContext and state.tradeContext.direction == "payout" then self:CompletePayoutTrade() else self:CompleteEscrowTrade() end
             if completedContext and completedContext.direction == "outgoingJoin" and completedContext.request and completedContext.request.picks then
                 local request = completedContext.request
                 Send("SERIES_JOIN_BEGIN", request.id, request.totalStake, request.stake, #request.picks)
                 for i, pick in ipairs(request.picks) do Send("SERIES_JOIN_PICK", request.id, i, pick.guid, pick.name) end
             end
-            state.tradeContext = nil
+            if completedContext and completedContext.direction == "unassigned" then
+                C_Timer.After(30, function() if state.tradeContext == completedContext then state.tradeContext = nil end end)
+            else state.tradeContext = nil end
         end
     elseif event == "TRADE_CLOSED" then
         state.pendingTrade = nil
@@ -4280,10 +4304,12 @@ function Gamble:OnEvent(event, ...)
                 Send("SERIES_JOIN_BEGIN", request.id, request.totalStake, request.stake, #request.picks)
                 for i, pick in ipairs(request.picks) do Send("SERIES_JOIN_PICK", request.id, i, pick.guid, pick.name) end
             end
-            state.tradeContext = nil
+            if completedContext.direction == "unassigned" then
+                C_Timer.After(30, function() if state.tradeContext == completedContext then state.tradeContext = nil end end)
+            else state.tradeContext = nil end
         elseif state.tradeContext then
             local closingContext = state.tradeContext
-            C_Timer.After(3, function()
+            C_Timer.After(closingContext.direction == "unassigned" and 30 or 3, function()
                 if state.tradeContext == closingContext then
                     if closingContext.direction == "incoming" then Print("Trade closed without a readable completion confirmation. Payment remains unconfirmed; do not pay again.") end
                     state.tradeContext = nil
