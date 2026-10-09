@@ -4,7 +4,7 @@ Gamble = Gamble or {}
 
 local PREFIX = "GambleFW1"
 local VERSION = 32
-local ADDON_VERSION = "0.19.11"
+local ADDON_VERSION = "0.19.12"
 local floor, max = math.floor, math.max
 local DEFAULT_MINIMAP_RADIUS = 104 -- Abstand vom Mittelpunkt; kann auch mit /gamble minimap ZAHL gesetzt werden.
 local DEFAULT_MINIMAP_ANGLE = 225 -- Winkel in Grad; optional mit /gamble minimap RADIUS WINKEL setzen.
@@ -2391,6 +2391,14 @@ function Gamble:RefreshRoster()
     self.rosterContent:SetHeight(max(1, shown * 34))
 end
 
+function Gamble:HasInstanceProgress(name)
+    local dataName=ResolveInstanceDataName(name)
+    local prefix=NormalizeInstanceName(dataName)..":"
+    for key,defeated in pairs(state.defeatedBosses or {}) do
+        if defeated and key:sub(1,#prefix)==prefix then return true end
+    end
+    return false
+end
 function Gamble:ResetInstanceProgress(name,stamp,fromPeer)
     local dataName=ResolveInstanceDataName(name)
     if not BOSS_FALLBACKS[dataName] then return false end
@@ -2412,7 +2420,7 @@ function Gamble:ResetInstanceProgress(name,stamp,fromPeer)
         end
     end
     SaveSession()
-    Print("Instanz zurückgesetzt: "..dataName..". Neue Wetten verwenden wieder die vollständige Bossliste; bestehende Wetten bleiben unverändert.")
+    Print("Boss progress cleared: "..dataName..". New bets use the full boss list; existing bets remain unchanged.")
     self:Refresh()
     return true
 end
@@ -2449,12 +2457,12 @@ function Gamble:BuildInstanceDropdown(level, menuList)
     for name, bosses in pairs(BOSS_FALLBACKS) do if #bosses > 0 then entries[#entries+1] = name end end
     table.sort(entries)
     local function Add(name)
-        local info = UIDropDownMenu_CreateInfo(); info.text = name or "Automatisch (aktuelle / letzte Instanz)"
+        local info = UIDropDownMenu_CreateInfo(); info.text = name or "Automatic (current / last instance)"
         info.checked = state.preselectedInstance == name
         info.func = function()
             state.preselectedInstance = name; wipe(state.seriesPicks); state.seriesStep = 1
             LoadCurrentInstanceBosses()
-            UIDropDownMenu_SetText(Gamble.instanceDropdown, name or "Instanz: automatisch")
+            UIDropDownMenu_SetText(Gamble.instanceDropdown, name or "Instance: automatic")
             Gamble:Refresh()
         end
         UIDropDownMenu_AddButton(info, level)
@@ -2465,9 +2473,9 @@ function Gamble:BuildInstanceDropdown(level, menuList)
     end
     Add(nil)
     local last=BettingInstanceName()
-    if last then
-        local resetInfo=UIDropDownMenu_CreateInfo(); resetInfo.text="Bossfortschritt löschen: "..last; resetInfo.notCheckable=true
-        resetInfo.func=function() Gamble:ResetInstanceProgress(last) end
+    if last and self:HasInstanceProgress(last) then
+        local resetInfo=UIDropDownMenu_CreateInfo(); resetInfo.text="Clear boss progress: "..last; resetInfo.notCheckable=true
+        resetInfo.func=function() CloseDropDownMenus(); Gamble:ResetInstanceProgress(last) end
         UIDropDownMenu_AddButton(resetInfo,level)
     end
     local nearby = GambleData.GetZoneInstances()
@@ -2834,7 +2842,7 @@ function Gamble:Refresh()
     local configured = a or state.selectedType
     if not a and not state.preselectedInstance then
         local automatic=BettingCreationInstanceName()
-        UIDropDownMenu_SetText(self.instanceDropdown,automatic and ("Automatisch: "..automatic) or "Instanz: automatisch")
+        UIDropDownMenu_SetText(self.instanceDropdown,automatic and ("Automatic: "..automatic) or "Instance: automatic")
     end
     local bossMode = a and (a.mode == "NEXT_BOSS" or a.mode == "LAST_MAN_STANDING" or a.mode == "ITEM_DROP" or IsEncounterBetMode(a.mode))
     local itemMode = a and a.mode == "ITEM_DROP"
