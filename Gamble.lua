@@ -4,7 +4,7 @@ Gamble = Gamble or {}
 
 local PREFIX = "GambleFW1"
 local VERSION = 32
-local ADDON_VERSION = "0.19.12"
+local ADDON_VERSION = "0.19.13"
 local floor, max = math.floor, math.max
 local DEFAULT_MINIMAP_RADIUS = 104 -- Abstand vom Mittelpunkt; kann auch mit /gamble minimap ZAHL gesetzt werden.
 local DEFAULT_MINIMAP_ANGLE = 225 -- Winkel in Grad; optional mit /gamble minimap RADIUS WINKEL setzen.
@@ -19,7 +19,7 @@ local BET_TYPES = {
     PULL_TIMER_DEATH = { label = "Pull Timer Death", search = "boss timer first death seconds" },
     TOTAL_DEATHS = { label = "Total Deaths", search = "boss total dead count deaths" },
     DOUBLE_OR_NOTHING = { label = "Double or Nothing", search = "double nothing dice roll multiplayer" },
-    ROCK_PAPER_SCISSORS = { label = "Schere Stein Papier", search = "schere stein papier rock paper scissors best of multiplayer" },
+    ROCK_PAPER_SCISSORS = { label = "Rock Paper Scissors", search = "schere stein papier rock paper scissors best of multiplayer" },
     DAMAGE_RACE = { label = "Damage Race", search = "damage dmg dps timer race" },
     BOSS_DAMAGE_SERIES = { label = "Boss Damage Series: Top 3", search = "damage dps boss series dungeon raid top 3" },
 }
@@ -2716,7 +2716,7 @@ function Gamble:RefreshRunningCards(wagers)
         card.title:SetText(cardTitle)
         if wager.rps then
             card.context:SetText(wager.context or "Mehrspieler")
-            card.pick:SetText(wager.minimum==0 and "Kostenlos – keine Einzahlung erforderlich" or ("Einsatz pro Spieler: "..Money(wager.minimum)))
+            card.pick:SetText(wager.minimum==0 and "Pussy Mode" or ("Einsatz pro Spieler: "..Money(wager.minimum)))
         elseif wager.don then
             card.context:SetText(wager.context or "Multiplayer dice game")
             card.pick:SetText(wager.summary or "")
