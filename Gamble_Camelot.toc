@@ -3,7 +3,7 @@
 ## IconTexture: Interface\Icons\achievement_guildperk_ladyluck
 ## Notes: Group betting games, boss predictions and manual gold settlements.
 ## Author: HanYokai
-## Version: 0.19.18
+## Version: 0.19.19
 ## SavedVariables: GambleDB, GambleDONDB, GambleBankSecurityDB, GambleRPSDB
 ## AllowLoadGameType: camelot
 

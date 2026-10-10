@@ -30,6 +30,7 @@ local function refresh()
     if R.AnnounceChoices then R:AnnounceChoices() end
     if main and main.Refresh then main:Refresh() end
     if R.RefreshChoicePopup then R:RefreshChoicePopup() end
+    if R.RefreshWinnerPopup then R:RefreshWinnerPopup() end
 end
 local function drain()
     local item=outgoing[queueHead]
@@ -187,6 +188,29 @@ function R:Cancel()
     if resolve(true) then game.notice="Cancelled. Paid stakes will be refunded."; broadcast() end
 end
 function R:SetMainController(controller) main=controller end
+function R:RefreshWinnerPopup()
+    if not game or not game.winner or (game.status~="DONE" and game.status~="CLOSED") or not own() then return end
+    self.announcedWinners=self.announcedWinners or {}
+    if self.announcedWinners[game.id] then return end
+    if not self.resultPopup then
+        local popup=CreateFrame("Frame","GambleRPSWinnerPopup",UIParent,"BasicFrameTemplateWithInset")
+        popup:SetSize(320,170); popup:SetPoint("CENTER",UIParent,"CENTER",0,160); popup:SetFrameStrata("DIALOG")
+        popup.TitleText:SetText("Gypsy Gamble - Rock Paper Scissors")
+        popup.name=popup:CreateFontString(nil,"OVERLAY","GameFontNormalLarge"); popup.name:SetPoint("TOP",0,-42)
+        popup.amount=popup:CreateFontString(nil,"OVERLAY","GameFontHighlight"); popup.amount:SetPoint("TOP",0,-74)
+        popup.score=popup:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); popup.score:SetPoint("TOP",0,-98)
+        local details=CreateFrame("Button",nil,popup,"UIPanelButtonTemplate")
+        details:SetSize(120,24); details:SetPoint("BOTTOM",0,16); details:SetText("View Details")
+        details:SetScript("OnClick",function() popup:Hide(); R:ShowDetails() end)
+        self.resultPopup=popup
+    end
+    self.announcedWinners[game.id]=true
+    local winner=game.players[key(game.winner)]
+    self.resultPopup.name:SetText("|cff55ff55WINNER: "..short(game.winner).."|r")
+    self.resultPopup.amount:SetText(game.stake>0 and ("Winnings: "..moneyText(pot())) or "Pussy Mode")
+    self.resultPopup.score:SetText((winner and winner.points or 0).." wins · Best of "..game.bestOf)
+    self.resultPopup:Show(); self.resultPopup:Raise()
+end
 function R:AnnounceChoices()
     if not game or not game.reveal or not own() then return end
     local id=game.id..":"..game.reveal.bout
