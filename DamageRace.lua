@@ -153,7 +153,7 @@ function Race:Render(main,wager,mode,host)
         self.start:SetScript("OnClick",function() main:StartDamageRace() end)
         self.main=main
     end
-    local visible=mode=="DAMAGE_RACE" and main.uiTab~="RUNNING" and main.uiTab~="DON_DETAIL"
+    local visible=mode=="DAMAGE_RACE" and (main.uiTab=="NEW" or main.uiTab=="DETAIL")
     self.duration:SetShown(visible and (not wager or wager.setupPending) and (not wager or host))
     self.label:SetShown(self.duration:IsShown())
     self.start:SetShown(visible and wager and host and not wager.setupPending and not wager.locked and not wager.result or false)

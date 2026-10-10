@@ -4,7 +4,7 @@ Gamble = Gamble or {}
 
 local PREFIX = "GambleFW1"
 local VERSION = 32
-local ADDON_VERSION = "0.19.13"
+local ADDON_VERSION = "0.19.15"
 local floor, max = math.floor, math.max
 local DEFAULT_MINIMAP_RADIUS = 104 -- Abstand vom Mittelpunkt; kann auch mit /gamble minimap ZAHL gesetzt werden.
 local DEFAULT_MINIMAP_ANGLE = 225 -- Winkel in Grad; optional mit /gamble minimap RADIUS WINKEL setzen.
@@ -1335,7 +1335,7 @@ function Gamble:CreateMinimapButton()
     local background = button:CreateTexture(nil, "BACKGROUND")
     background:SetSize(22, 22); background:SetPoint("CENTER"); background:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
     local icon = button:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(20, 20); icon:SetPoint("CENTER"); icon:SetTexture("Interface\\Icons\\INV_Misc_Coin_01"); icon:SetTexCoord(.08, .92, .08, .92)
+    icon:SetSize(20, 20); icon:SetPoint("CENTER"); icon:SetTexture("Interface\\Icons\\achievement_guildperk_ladyluck"); icon:SetTexCoord(.08, .92, .08, .92)
     local border = button:CreateTexture(nil, "OVERLAY")
     border:SetSize(54, 54); border:SetPoint("TOPLEFT", 0, 0); border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
     button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
@@ -2776,7 +2776,6 @@ function Gamble:Refresh()
             if not queued and not (don and don.id=="DON:"..payment.wagerID) then state.payments[#state.payments+1]=payment end
         end
     end
-    if GambleDamageRace then GambleDamageRace:Render(self, state.active, state.active and state.active.mode or state.selectedType, state.active and SamePlayer(state.active.host, PlayerName())) end
     self.rulesText:SetShown(self.uiTab == "NEW" and state.selectedType ~= nil and state.selectedType ~= "DOUBLE_OR_NOTHING" and state.selectedType ~= "ROCK_PAPER_SCISSORS")
     if state.selectedType then self.rulesText:SetText(self:GetRules(state.selectedType)) end
     if GambleBankSecurity then GambleBankSecurity:SyncFromRuntime(state.wagers, state.payments, PlayerName()) end
@@ -2789,6 +2788,7 @@ function Gamble:Refresh()
     elseif self.uiTab == "RPS_DETAIL" then state.active=nil
     elseif self.uiTab == "DETAIL" and self.detailWagerID then state.active = FindWager(self.detailWagerID) end
     local runningListVisible = self:RefreshBettingNavigation()
+    if GambleDamageRace then GambleDamageRace:Render(self, state.active, state.active and state.active.mode or state.selectedType, state.active and SamePlayer(state.active.host, PlayerName())) end
     local showInstance=self.uiTab=="NEW" and not state.active and (IsBossSeries(state.selectedType) or state.selectedType=="NEXT_BOSS" or state.selectedType=="LAST_MAN_STANDING" or state.selectedType=="ITEM_DROP" or IsEncounterBetMode(state.selectedType)) or false
     self.instanceDropdown:SetShown(showInstance)
     if state.active and state.active.mode~="BOSS_DAMAGE_SERIES" and state.active.awaitingStart and SamePlayer(state.active.host,PlayerName()) and self:CanStartBet(state.active) then
