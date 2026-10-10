@@ -25,7 +25,11 @@ end
 local function save()
     GambleRPSDB=GambleRPSDB or {}; GambleRPSDB.characters=GambleRPSDB.characters or {}; GambleRPSDB.characters[me()]=game
 end
-local function refresh() save(); if main and main.Refresh then main:Refresh() end end
+local function refresh()
+    save()
+    if main and main.Refresh then main:Refresh() end
+    if R.RefreshChoicePopup then R:RefreshChoicePopup() end
+end
 local function drain()
     local item=outgoing[queueHead]
     if not item then
@@ -177,6 +181,61 @@ function R:Cancel()
     if resolve(true) then game.notice="Cancelled. Paid stakes will be refunded."; broadcast() end
 end
 function R:SetMainController(controller) main=controller end
+function R:RefreshChoicePopup()
+    local participant=own()
+    if not game or game.status~="RUNNING" or not participant then
+        if self.choicePopup then self.choicePopup:Hide() end
+        return
+    end
+    if not main or not main.frame then return end
+    if self.choiceGameID~=game.id then
+        self.choiceGameID=game.id
+        main.frame:Hide()
+        self:HideEmbedded()
+        if main.CloseAuxiliaryWindows then main:CloseAuxiliaryWindows() end
+    end
+    if not self.choicePopup then
+        local popup=CreateFrame("Frame","GambleRPSChoicePopup",UIParent)
+        popup:SetSize(190,108); popup:SetFrameStrata("DIALOG")
+        popup:SetMovable(true); popup:SetClampedToScreen(true); popup:RegisterForDrag("LeftButton")
+        GambleRPSDB=GambleRPSDB or {}
+        local saved=GambleRPSDB.choicePosition
+        popup:SetPoint("CENTER",UIParent,"CENTER",saved and saved.x or 0,saved and saved.y or 100)
+        popup:SetScript("OnDragStart",function(self) if not GambleRPSDB.choiceLocked then self:StartMoving() end end)
+        popup:SetScript("OnDragStop",function(self)
+            self:StopMovingOrSizing()
+            local x,y=self:GetCenter(); local cx,cy=UIParent:GetCenter()
+            if x and y and cx and cy then GambleRPSDB.choicePosition={x=x-cx,y=y-cy} end
+        end)
+        popup.icons={}
+        local icons={S="inv_knife_1h_garrison_a_01",R="inv_ore_tin_01",P="inv_misc_paperbundle02a"}
+        for i,sign in ipairs({"S","R","P"}) do
+            local b=CreateFrame("Button",nil,popup); b:SetSize(48,48); b:SetPoint("TOPLEFT",(i-1)*60,0)
+            b.icon=b:CreateTexture(nil,"ARTWORK"); b.icon:SetAllPoints(); b.icon:SetTexture("Interface\\Icons\\"..icons[sign])
+            b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square","ADD")
+            b:SetScript("OnClick",function() if game and game.status=="RUNNING" then request("PICK",sign,game.bout) end end)
+            b:SetScript("OnEnter",function(self) if GameTooltip then GameTooltip:SetOwner(self,"ANCHOR_RIGHT"); GameTooltip:SetText(labels[sign]); GameTooltip:Show() end end)
+            b:SetScript("OnLeave",function() if GameTooltip then GameTooltip:Hide() end end)
+            popup.icons[i]=b
+        end
+        popup.result=popup:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+        popup.result:SetPoint("TOPLEFT",0,-54); popup.result:SetPoint("TOPRIGHT",0,-54); popup.result:SetJustifyH("CENTER")
+        local lock=CreateFrame("Button",nil,popup); lock:SetSize(80,18); lock:SetPoint("BOTTOM",0,0)
+        lock.text=lock:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); lock.text:SetAllPoints()
+        lock:SetScript("OnClick",function() GambleRPSDB.choiceLocked=not GambleRPSDB.choiceLocked; R:RefreshChoicePopup() end)
+        popup.lock=lock; self.choicePopup=popup
+    end
+    local popup=self.choicePopup
+    popup:EnableMouse(not GambleRPSDB.choiceLocked)
+    popup.lock.text:SetText(GambleRPSDB.choiceLocked and "Unlock" or "Lock")
+    local enabled=participant.active and not participant.chosen
+    for _,b in ipairs(popup.icons) do b:SetEnabled(not not enabled); b.icon:SetDesaturated(not enabled); b.icon:SetAlpha(enabled and 1 or .45) end
+    local history=game.history or {}
+    local latest=history[#history]
+    local status=participant.chosen and "Waiting for other players..." or (participant.active and "Choose your sign" or "Waiting for this round to finish...")
+    popup.result:SetText((latest and ("|cff55ff55"..latest.."|r\n") or "")..status)
+    popup:Show()
+end
 function R:HideEmbedded() if view then view:Hide(); if view.paymentPopup then view.paymentPopup:Hide() end end end
 function R:RequestSync(force)
     if host() then return end
@@ -419,5 +478,5 @@ frame:SetScript("OnEvent",function(_,event,...)
 end)
 frame:SetScript("OnUpdate",function(_,elapsed)
     syncElapsed=syncElapsed+elapsed; if syncElapsed<5 then return end; syncElapsed=0
-    if not host() and main and main.frame and main.frame:IsShown() and (main.uiTab=="RPS_DETAIL" or main.uiTab=="RUNNING") then R:RequestSync() end
+    if not host() and main and main.frame and ((game and game.status=="RUNNING" and own()) or (main.frame:IsShown() and (main.uiTab=="RPS_DETAIL" or main.uiTab=="RUNNING"))) then R:RequestSync() end
 end)

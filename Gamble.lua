@@ -4,7 +4,7 @@ Gamble = Gamble or {}
 
 local PREFIX = "GambleFW1"
 local VERSION = 32
-local ADDON_VERSION = "0.19.15"
+local ADDON_VERSION = "0.19.17"
 local floor, max = math.floor, math.max
 local DEFAULT_MINIMAP_RADIUS = 104 -- Abstand vom Mittelpunkt; kann auch mit /gamble minimap ZAHL gesetzt werden.
 local DEFAULT_MINIMAP_ANGLE = 225 -- Winkel in Grad; optional mit /gamble minimap RADIUS WINKEL setzen.
@@ -1344,10 +1344,8 @@ function Gamble:CreateMinimapButton()
     end)
     button:SetScript("OnEnter", function(selfButton)
         GameTooltip:SetOwner(selfButton, "ANCHOR_LEFT")
-        GameTooltip:SetText("Gamble - Betting Office", 1, .82, 0)
-        GameTooltip:AddLine("Left-click: Open or close the betting office", 1, 1, 1)
+        GameTooltip:SetText("Gypsy Gamble", 1, .82, 0)
         GameTooltip:AddLine("Drag: Change position", .75, .75, .75)
-        GameTooltip:AddLine("/gamble minimap 94 225: set exact position", .75, .75, .75)
         GameTooltip:Show()
     end)
     button:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1615,7 +1613,7 @@ function Gamble:CreateUI()
     local f = CreateFrame("Frame", "GambleMainFrame", UIParent, "BasicFrameTemplateWithInset")
     f:SetSize(520, 600); f:SetPoint("CENTER"); f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving); f:SetScript("OnDragStop", f.StopMovingOrSizing); f:Hide()
-    f.TitleText:SetText("Gamble - Betting Office")
+    f.TitleText:SetText("Gypsy Gamble - Betting Office")
     self.frame = f
     f:HookScript("OnHide", function() Gamble:CloseAuxiliaryWindows() end)
 
