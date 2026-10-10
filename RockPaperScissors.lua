@@ -27,6 +27,7 @@ local function save()
 end
 local function refresh()
     save()
+    if R.AnnounceChoices then R:AnnounceChoices() end
     if main and main.Refresh then main:Refresh() end
     if R.RefreshChoicePopup then R:RefreshChoicePopup() end
 end
@@ -86,6 +87,10 @@ broadcast=function(target)
     send("STATE",target,game.id,game.revision,game.host,game.stake,game.bestOf,game.status,game.round,game.bout,game.winner or "",#players(),game.createdAt or 0,game.generation or 0)
     for _,p in ipairs(players()) do send("PLAYER",target,game.id,game.revision,p.name,p.paid and 1 or 0,p.ready and 1 or 0,p.active and 1 or 0,p.points or 0,p.choice and 1 or 0,p.lastSign or "") end
     send("NOTICE",target,game.id,game.revision,(game.notice or ""):sub(1,165))
+    if game.reveal then
+        send("REVEAL",target,game.id,game.revision,game.reveal.bout,game.reveal.draw and 1 or 0)
+        for name,sign in pairs(game.reveal.choices) do send("REVEAL_PICK",target,game.id,game.revision,name,sign) end
+    end
     for _,line in ipairs(game.history or {}) do send("HISTORY",target,game.id,game.revision,line:sub(1,165)) end
     send("END",target,game.id,game.revision); refresh()
 end
@@ -118,6 +123,7 @@ local function settleBout()
     local choices={}
     for _,p in ipairs(players()) do if p.active then if not p.choice then return end; choices[p.name]=p.choice end end
     local survivors=R:Survivors(choices)
+    game.reveal={bout=game.bout,draw=not survivors,choices=choices}
     for _,p in ipairs(players()) do if p.active then p.lastSign=p.choice end end
     if not survivors then game.notice="Draw — active players choose again."; nextBout(); broadcast(); return end
     local count,winner=0,nil
@@ -181,6 +187,16 @@ function R:Cancel()
     if resolve(true) then game.notice="Cancelled. Paid stakes will be refunded."; broadcast() end
 end
 function R:SetMainController(controller) main=controller end
+function R:AnnounceChoices()
+    if not game or not game.reveal or not own() then return end
+    local id=game.id..":"..game.reveal.bout
+    self.announcedChoices=self.announcedChoices or {}
+    if self.announcedChoices[id] then return end
+    self.announcedChoices[id]=true
+    local names={}; for name in pairs(game.reveal.choices) do names[#names+1]=name end; table.sort(names)
+    for _,name in ipairs(names) do printLine(short(name).." chose "..(labels[game.reveal.choices[name]] or "?")) end
+    if game.reveal.draw then printLine("|cffffff00Draw — choose again.|r") end
+end
 function R:RefreshChoicePopup()
     local participant=own()
     if not game or game.status~="RUNNING" or not participant then
@@ -214,8 +230,15 @@ function R:RefreshChoicePopup()
             b.icon=b:CreateTexture(nil,"ARTWORK"); b.icon:SetAllPoints(); b.icon:SetTexture("Interface\\Icons\\"..icons[sign])
             b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square","ADD")
             b:SetScript("OnClick",function() if game and game.status=="RUNNING" then request("PICK",sign,game.bout) end end)
-            b:SetScript("OnEnter",function(self) if GameTooltip then GameTooltip:SetOwner(self,"ANCHOR_RIGHT"); GameTooltip:SetText(labels[sign]); GameTooltip:Show() end end)
-            b:SetScript("OnLeave",function() if GameTooltip then GameTooltip:Hide() end end)
+            b:SetScript("OnEnter",function(self)
+                self.icon:SetVertexColor(1,1,.65); self.icon:SetAlpha(1)
+                if self:IsEnabled() then self:LockHighlight() end
+                if GameTooltip then GameTooltip:SetOwner(self,"ANCHOR_RIGHT"); GameTooltip:SetText(labels[sign]); GameTooltip:Show() end
+            end)
+            b:SetScript("OnLeave",function(self)
+                self:UnlockHighlight(); self.icon:SetVertexColor(1,1,1); self.icon:SetAlpha(self:IsEnabled() and 1 or .45)
+                if GameTooltip then GameTooltip:Hide() end
+            end)
             popup.icons[i]=b
         end
         popup.result=popup:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
@@ -233,7 +256,8 @@ function R:RefreshChoicePopup()
     local history=game.history or {}
     local latest=history[#history]
     local status=participant.chosen and "Waiting for other players..." or (participant.active and "Choose your sign" or "Waiting for this round to finish...")
-    popup.result:SetText((latest and ("|cff55ff55"..latest.."|r\n") or "")..status)
+    local resultText=game.reveal and game.reveal.draw and "|cffffff00Draw — choose again.|r\n" or (latest and ("|cff55ff55"..latest.."|r\n") or "")
+    popup.result:SetText(resultText..status)
     popup:Show()
 end
 function R:HideEmbedded() if view then view:Hide(); if view.paymentPopup then view.paymentPopup:Hide() end end end
@@ -436,6 +460,8 @@ local function receive(message,sender)
     if not incoming or incoming.id~=id or incoming.revision~=rev or not same(sender,incoming.host) then return end
     if cmd=="PLAYER" then incoming.players[key(p[4])]={name=p[4],paid=p[5]=="1",ready=p[6]=="1",active=p[7]=="1",points=tonumber(p[8]) or 0,chosen=p[9]=="1",lastSign=labels[p[10]] and p[10] or nil}
     elseif cmd=="NOTICE" then incoming.notice=p[4]
+    elseif cmd=="REVEAL" then incoming.reveal={bout=tonumber(p[4]) or 0,draw=p[5]=="1",choices={}}
+    elseif cmd=="REVEAL_PICK" then if incoming.reveal and labels[p[5]] then incoming.reveal.choices[p[4]]=p[5] end
     elseif cmd=="HISTORY" then if #incoming.history<15 then incoming.history[#incoming.history+1]=p[4] end
     elseif cmd=="END" then
         local n=0; for _ in pairs(incoming.players) do n=n+1 end
