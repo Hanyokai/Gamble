@@ -4,7 +4,7 @@ Gamble = Gamble or {}
 
 local PREFIX = "GambleFW1"
 local VERSION = 32
-local ADDON_VERSION = "0.19.19"
+local ADDON_VERSION = "0.19.21"
 local floor, max = math.floor, math.max
 local DEFAULT_MINIMAP_RADIUS = 104 -- Abstand vom Mittelpunkt; kann auch mit /gamble minimap ZAHL gesetzt werden.
 local DEFAULT_MINIMAP_ANGLE = 225 -- Winkel in Grad; optional mit /gamble minimap RADIUS WINKEL setzen.
@@ -3165,7 +3165,6 @@ function Gamble:PrimaryAction()
         self.uiTab = "NEW"; self.detailWagerID = nil
         UIDropDownMenu_SetText(self.typeDropdown, "Select a bet type …"); self:Refresh(); return
     end
-    if not IsInGroup() then Print("You must be in a party or raid."); return end
     local stake = CurrentStake()
     local a = state.active
     local moneyNeeded = stake
@@ -4297,7 +4296,16 @@ function Gamble:OnEvent(event, ...)
             if recipient and CanRead(recipient) then
                 state.tradeContext = { direction = "unassigned", partner = recipient, offered = 0 }
             end
-            Print("Trade partner: " .. tostring(recipient or "unavailable") .. ". No matching pending bet payment was found. Join the bet before trading.")
+            local openPaymentContext=false
+            for _,wager in ipairs(state.wagers or {}) do
+                if not wager.result and not wager.locked and wager.awaitingStart~=false
+                    and (SamePlayer(wager.host,PlayerName()) or SamePlayer(wager.host,recipient)) then
+                    openPaymentContext=true; break
+                end
+            end
+            if openPaymentContext then
+                Print("Trade partner: " .. tostring(recipient or "unavailable") .. ". No matching pending bet payment was found. Join the bet before trading.")
+            end
         end
     elseif event == "TRADE_MONEY_CHANGED" or event == "TRADE_ACCEPT_UPDATE" then
         if state.tradeContext and state.tradeContext.direction=="payout" then

@@ -212,7 +212,7 @@ local function TradeIntent()
 end
 
 local function SyncBankSession()
-    if not GambleBankSecurity or not session or not SamePlayer(session.host, PlayerName()) then return true end
+    if not GambleBankSecurity or not session or session.stake==0 or not SamePlayer(session.host, PlayerName()) then return true end
     local ok, reason = GambleBankSecurity:RegisterWager(session.id, session.stake, session.stake)
     if not ok and reason ~= "ALREADY_FUNDED" and reason ~= "DUPLICATE_IGNORED" then return false, reason end
     for _, player in pairs(session.players or {}) do if player.paid then GambleBankSecurity:RegisterDeposit(session.id, player.name, session.stake) end end
@@ -303,6 +303,7 @@ local function CloseSettledWinnerPopup()
 end
 
 local function Refresh()
+    if DON.RefreshDicePopup then DON:RefreshDicePopup() end
     CloseSettledWinnerPopup()
     if not ui.frame then return end
     local s = session
@@ -328,7 +329,7 @@ local function Refresh()
         if IsHost() then ui.abortButton:Show() end
     elseif s.status == "PAYOUT" then
         if IsHost() and not s.payoutDone then
-            ui.payoutButton:SetText(SamePlayer(s.winner, s.host) and "Settle Winnings" or "Pay Winner")
+            ui.payoutButton:SetText(s.stake==0 and "Finish Game" or (SamePlayer(s.winner, s.host) and "Settle Winnings" or "Pay Winner"))
             ui.payoutButton:Show()
         end
     end
@@ -477,21 +478,82 @@ ShowWinnerPopup = function()
     ui.pendingWinnerPopup = nil
     GambleTradeAction:Prepare(ui.winnerTrade)
     ui.winnerFrame.name:SetText("|cffffd100WINNER: " .. ShortName(session.winner) .. "|r")
-    ui.winnerFrame.amount:SetText("Winnings: " .. Money(WinnerAmount()))
+    ui.winnerFrame.amount:SetText(session.stake==0 and "Pussy Mode" or ("Winnings: " .. Money(WinnerAmount())))
+    if session.stake==0 then ui.winnerTrade:Hide() end
     ui.winnerFrame.rounds:SetText("Rounds played: " .. tostring(session.round or 0))
     ui.winnerFrame:Show(); ui.winnerFrame:Raise()
 end
 
+function DON:RefreshDicePopup()
+    if session then
+        ui.announcedRolls=ui.announcedRolls or {}
+        for _,entry in ipairs(session.history or {}) do
+            local id=session.id..":"..entry.round..":"..entry.name
+            if not ui.announcedRolls[id] then
+                ui.announcedRolls[id]=true
+                Print(ShortName(entry.name).." rolled "..entry.roll.." — "..(entry.result or ""))
+            end
+        end
+    end
+    local player=session and Participant(PlayerName())
+    if not session or session.status~="RUNNING" or not player then
+        if ui.dicePopup then ui.dicePopup:Hide() end
+        return
+    end
+    if ui.diceSessionID~=session.id then
+        ui.diceSessionID=session.id
+        if ui.main and ui.main.frame then ui.main.frame:Hide(); if ui.main.CloseAuxiliaryWindows then ui.main:CloseAuxiliaryWindows() end end
+        if ui.frame then ui.frame:Hide() end
+        if ui.paymentPopup then ui.paymentPopup:Hide() end
+    end
+    GambleDONDB=GambleDONDB or {}
+    if not ui.dicePopup then
+        local popup=CreateFrame("Frame","GambleDONDicePopup",UIParent)
+        popup:SetSize(190,108); popup:SetFrameStrata("DIALOG"); popup:SetMovable(true); popup:SetClampedToScreen(true); popup:RegisterForDrag("LeftButton")
+        local pos=GambleDONDB.dicePosition
+        popup:SetPoint("CENTER",UIParent,"CENTER",pos and pos.x or 0,pos and pos.y or 100)
+        popup:SetScript("OnDragStart",function(self) if not GambleDONDB.diceLocked then self:StartMoving() end end)
+        popup:SetScript("OnDragStop",function(self)
+            self:StopMovingOrSizing(); local x,y=self:GetCenter(); local cx,cy=UIParent:GetCenter()
+            if x and y and cx and cy then GambleDONDB.dicePosition={x=x-cx,y=y-cy} end
+        end)
+        local b=CreateFrame("Button",nil,popup); b:SetSize(48,48); b:SetPoint("TOP",0,0)
+        b.icon=b:CreateTexture(nil,"ARTWORK"); b.icon:SetAllPoints(); b.icon:SetTexture("Interface\\Icons\\INV_Misc_Dice_01")
+        b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square","ADD")
+        b:SetScript("OnClick",function() DON:Roll(); DON:RefreshDicePopup() end)
+        b:SetScript("OnEnter",function(self)
+            self.icon:SetVertexColor(1,1,.65)
+            if GameTooltip then GameTooltip:SetOwner(self,"ANCHOR_RIGHT"); GameTooltip:SetText("Roll (1–100)"); GameTooltip:Show() end
+        end)
+        b:SetScript("OnLeave",function(self) self.icon:SetVertexColor(1,1,1); if GameTooltip then GameTooltip:Hide() end end)
+        popup.roll=b
+        popup.result=popup:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); popup.result:SetPoint("TOPLEFT",0,-54); popup.result:SetPoint("TOPRIGHT",0,-54)
+        local lock=CreateFrame("Button",nil,popup); lock:SetSize(80,18); lock:SetPoint("BOTTOM",0,0)
+        lock.text=lock:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); lock.text:SetAllPoints()
+        lock:SetScript("OnClick",function() GambleDONDB.diceLocked=not GambleDONDB.diceLocked; DON:RefreshDicePopup() end)
+        popup.lock=lock; ui.dicePopup=popup
+    end
+    local popup=ui.dicePopup
+    popup:EnableMouse(not GambleDONDB.diceLocked)
+    popup.lock.text:SetText(GambleDONDB.diceLocked and "Unlock" or "Lock")
+    local waiting=pendingRoll and pendingRoll.id==session.id and pendingRoll.round==session.round and pendingRoll.expires>=time()
+    local enabled=player.active and not player.roll and not waiting
+    popup.roll:SetEnabled(not not enabled); popup.roll.icon:SetDesaturated(not enabled); popup.roll.icon:SetAlpha(enabled and 1 or .45)
+    local previous=session.history and session.history[#session.history]
+    local winner=previous and DON:RoundWinnerText(session.history,previous.round,session.maxRounds)
+    popup.result:SetText((winner and ("|cff55ff55"..winner.."|r\n") or "")..(enabled and "Click to roll" or "Waiting for other players..."))
+    popup:Show()
+end
+
 function DON:CreateGame()
     if session and session.status ~= "DONE" and session.status ~= "ABORTED" then Print("A Double or Nothing game is already active."); return end
-    if not Channel() then Print("You must be in a party or raid."); return end
     local stake, limit = floor(StakeFromBoxes()), 40
     local roundsBox = ui.embedded and ui.embedded:IsShown() and ui.embRounds or ui.maxRounds
     local maxRounds = floor(tonumber(roundsBox and roundsBox:GetText()) or 0)
-    if stake <= 0 then Print("The stake must be greater th to 0."); return end
+    stake=max(0,stake)
     if maxRounds < 1 or maxRounds > 50 then Print("The round count must be between 1 and 50."); return end
     if GetMoney and GetMoney() < stake then Print("Not enough gold for your stake."); return end
-    if GambleBankSecurity then
+    if GambleBankSecurity and stake>0 then
         local allowed, reason = GambleBankSecurity:CanCreateFinancialObligation(stake, stake)
         if not allowed then Print("BET BLOCKED – " .. tostring(reason) .. ". Open Bank Status in the main window."); return end
     end
@@ -500,7 +562,7 @@ function DON:CreateGame()
     session.players[Key(me)] = { name = me, ready = true, paid = true, active = true, connected = true, joinedAt = time() }
     local bankOK, bankReason = SyncBankSession()
     if not bankOK then session = nil; Print("BET BLOCKED – " .. tostring(bankReason)); Save(); Refresh(); return end
-    Save(); BroadcastState(); Refresh(); Print("Lobby opened. The host stake is reserved in the pot.")
+    Save(); BroadcastState(); Refresh(); Print(stake==0 and "Lobby opened — Pussy Mode. No deposits required." or "Lobby opened. The host stake is reserved in the pot.")
     self:ShowDetails()
 end
 
@@ -577,7 +639,7 @@ end
 
 function DON:PreparePayout()
     if not IsHost() or not session or session.status ~= "PAYOUT" or session.payoutDone then return end
-    if SamePlayer(session.winner, session.host) then
+    if session.stake==0 or SamePlayer(session.winner, session.host) then
         local net = WinnerAmount()
         session.payoutDone, session.status = true, "DONE"
         Bump(); BroadcastState(); Save(); Refresh()
@@ -591,7 +653,7 @@ end
 
 function DON:ConfirmAbort()
     if not IsHost() or not session or (session.status ~= "LOBBY" and session.status ~= "RUNNING") then return end
-    if GambleBankSecurity then
+    if GambleBankSecurity and session.stake>0 then
         local refunds = {}
         for _, player in pairs(session.players or {}) do if player.paid and not SamePlayer(player.name, session.host) then refunds[#refunds + 1] = { name = player.name, amount = session.stake, reason = "Refund" } end end
         GambleBankSecurity:ResolveWager(session.id, refunds, 0, "ABORTED")
@@ -802,8 +864,8 @@ local function OnAddonMessage(prefix, message, channel, sender)
     end
     if not IsHost() or not session or p[2] ~= session.id or incompatiblePeers[Key(sender)] then return end
     if command == "JOIN" and session.status == "LOBBY" and not Participant(sender) and PlayerCount() < session.maxPlayers then
-        if GambleBankSecurity then local allowed, reason = GambleBankSecurity:CanAcceptDeposits(); if not allowed then Print("Join rejected: " .. tostring(reason)); return end end
-        session.players[Key(sender)] = { name = sender, ready = false, paid = false, active = true, connected = true, joinedAt = time() }
+        if GambleBankSecurity and session.stake>0 then local allowed, reason = GambleBankSecurity:CanAcceptDeposits(); if not allowed then Print("Join rejected: " .. tostring(reason)); return end end
+        session.players[Key(sender)] = { name = sender, ready = false, paid = session.stake==0, active = true, connected = true, joinedAt = time() }
         Bump(); BroadcastState(); Refresh(); Print(ShortName(sender) .. " joined the lobby.")
     elseif command == "LEAVE" and session.status == "LOBBY" and not SamePlayer(sender, session.host) then
         local player = Participant(sender)
@@ -932,7 +994,7 @@ local function EnsureEmbedded(main)
     local roundsLabel = config:CreateFontString(nil, "OVERLAY", "GameFontHighlight"); roundsLabel:SetPoint("TOPLEFT", 4, -112); roundsLabel:SetText("Rounds:")
     ui.embRounds = CreateFrame("EditBox", nil, config, "InputBoxTemplate"); ui.embRounds:SetSize(64, 24); ui.embRounds:SetPoint("TOPLEFT", 145, -105); ui.embRounds:SetAutoFocus(false); ui.embRounds:SetNumeric(true); ui.embRounds:SetMaxLetters(2); ui.embRounds:SetText("5")
     ui.embCreate = MakeButton(config, 190, "Create Game"); ui.embCreate:SetPoint("TOPLEFT", 240, -105); ui.embCreate:SetScript("OnClick", function() DON:CreateGame() end)
-    local function updateCreate() ui.embCreate:SetEnabled((tonumber(ui.embGold:GetText()) or 0)*10000 + (tonumber(ui.embSilver:GetText()) or 0)*100 + (tonumber(ui.embCopper:GetText()) or 0) > 0) end
+    local function updateCreate() ui.embCreate:SetEnabled(true) end
     for _, box in ipairs({ui.embGold, ui.embSilver, ui.embCopper}) do box:HookScript("OnTextChanged", updateCreate) end
     updateCreate()
     local explanation = config:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"); explanation:SetPoint("TOPLEFT", 4, -153); explanation:SetPoint("RIGHT", -4, 0); explanation:SetJustifyH("LEFT"); explanation:SetJustifyV("TOP")
@@ -1067,7 +1129,7 @@ function DON:RenderEmbedded(main, creationMode)
     ui.embeddedGame:SetShown(activeSession and true or false)
     ui.embeddedHeading:SetText(activeSession and ("Double or Nothing — " .. StatusText(session.status)) or "Create Double or Nothing")
     ui.embeddedSub:SetText(activeSession and ("Bank: " .. ClassColor(session.host) .. ShortName(session.host) .. "|r") or "Set the stake per player.")
-    ui.embCreate:SetEnabled(StakeFromBoxes() > 0)
+    ui.embCreate:SetEnabled(true)
     if not activeSession then main.frame:SetHeight(600); return end
 
     local me = Participant(PlayerName())
@@ -1082,9 +1144,9 @@ function DON:RenderEmbedded(main, creationMode)
         if me and me.active and not me.roll then ui.embRoll:Show() end
         if IsHost() then ui.embAbort:Show() end
     elseif session.status == "PAYOUT" and IsHost() and not session.payoutDone then
-        ui.embPayout:SetText(SamePlayer(session.winner, session.host) and "Settle Winnings" or "Pay Winner")
+        ui.embPayout:SetText(session.stake==0 and "Finish Game" or (SamePlayer(session.winner, session.host) and "Settle Winnings" or "Pay Winner"))
         -- External payouts use the actual trade-action button, not a second instruction-only button.
-        if SamePlayer(session.winner, session.host) then ui.embPayout:Show() end
+        if session.stake==0 or SamePlayer(session.winner, session.host) then ui.embPayout:Show() end
     end
     local canStart = IsHost() and session.status == "LOBBY" and PlayerCount() >= 2
     if canStart then for _, player in pairs(session.players) do if not player.ready or not player.paid or player.connected == false then canStart = false; break end end end
