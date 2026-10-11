@@ -126,6 +126,7 @@ end
 local outgoingTarget
 local sendQueue, queueHead, sending = {}, 1, false
 local function DrainQueue()
+    if session and session.testBot then sendQueue,queueHead,sending={},1,false; return end
     local item = sendQueue[queueHead]
     if not item then sendQueue, queueHead, sending = {}, 1, false; return end
     sendQueue[queueHead] = false; queueHead = queueHead + 1
@@ -134,6 +135,7 @@ local function DrainQueue()
     C_Timer.After(max(.08, (#item.payload + #PREFIX) / 1500), DrainQueue)
 end
 local function Send(...)
+    if session and session.testBot then return false end
     local channel = outgoingTarget and "WHISPER" or Channel()
     if not channel then return false end
     local fields = { ... }
@@ -303,6 +305,7 @@ local function CloseSettledWinnerPopup()
 end
 
 local function Refresh()
+    if DON.RunTestBot then DON:RunTestBot() end
     if DON.RefreshDicePopup then DON:RefreshDicePopup() end
     CloseSettledWinnerPopup()
     if not ui.frame then return end
@@ -637,6 +640,25 @@ local function RecordRoll(player, value)
     Save(); Refresh(); FinishRoundIfReady()
 end
 
+function DON:AddTestPlayer()
+    if not IsHost() or not session or session.status~="LOBBY" or session.stake~=0 or PlayerCount()~=1 then return false end
+    session.testBot=true
+    session.players[Key("TestBot")]={name="TestBot",ready=true,paid=true,active=true,connected=true,points=0,joinedAt=time()}
+    Save(); Refresh(); Print("LOCAL TEST — TestBot is ready. No group messages or gold."); return true
+end
+function DON:RunTestBot()
+    if not session or not session.testBot or not IsHost() or session.status~="RUNNING" then return end
+    local bot=Participant("TestBot")
+    if not bot or not bot.active or bot.roll then return end
+    local id=session.id..":"..session.round
+    if self.botPending==id then return end
+    self.botPending=id
+    local wager,round=session,session.round
+    C_Timer.After(.6,function()
+        if DON.botPending==id then DON.botPending=nil end
+        if session==wager and session.status=="RUNNING" and session.round==round then RecordRoll("TestBot",math.random(1,100)) end
+    end)
+end
 function DON:PreparePayout()
     if not IsHost() or not session or session.status ~= "PAYOUT" or session.payoutDone then return end
     if session.stake==0 or SamePlayer(session.winner, session.host) then
@@ -808,6 +830,7 @@ local function SchedulePlayerRefresh()
 end
 
 local function OnAddonMessage(prefix, message, channel, sender)
+    if session and session.testBot then return end
     if prefix ~= PREFIX or (channel ~= "PARTY" and channel ~= "RAID" and channel ~= "INSTANCE_CHAT" and channel ~= "WHISPER") or not IsGroupMember(sender) then return end
     if SamePlayer(sender, PlayerName()) then return end
     local p, command = Split(message), nil; command = p[1]
@@ -883,7 +906,7 @@ local function UpdateConnections()
     if not IsHost() or not session then return end
     local changed = false
     for _, player in pairs(session.players) do
-        local connected = IsGroupMember(player.name)
+        local connected = (session.testBot and player.name=="TestBot") or IsGroupMember(player.name)
         if player.connected ~= connected then player.connected = connected; changed = true end
     end
     if changed then Bump(); BroadcastState(); Refresh() end

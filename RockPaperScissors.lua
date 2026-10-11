@@ -31,8 +31,10 @@ local function refresh()
     if main and main.Refresh then main:Refresh() end
     if R.RefreshChoicePopup then R:RefreshChoicePopup() end
     if R.RefreshWinnerPopup then R:RefreshWinnerPopup() end
+    if R.RunTestBot then R:RunTestBot() end
 end
 local function drain()
+    if game and game.testBot then outgoing,queueHead,sending,pendingBroadcast={},1,false,false; return end
     local item=outgoing[queueHead]
     if not item then
         outgoing,queueHead,sending={},1,false
@@ -44,6 +46,7 @@ local function drain()
     if C_Timer and C_Timer.After then C_Timer.After(.08,drain) else drain() end
 end
 local function send(command,target,...)
+    if game and game.testBot then return end
     local parts={command}; for i=1,select("#",...) do parts[#parts+1]=tostring(select(i,...)):gsub("[\t\r\n]"," ") end
     local text=table.concat(parts,"\t"); if #text>250 then return end
     local channel=target and "WHISPER" or (IsInRaid() and "RAID" or "PARTY")
@@ -149,7 +152,7 @@ local function request(command,...)
     end
 end
 function R:Request(command,sender,argument,bout)
-    if not host() or not groupMember(sender) then return end
+    if not host() or not (groupMember(sender) or (game.testBot and sender=="TestBot")) then return end
     local p=game.players[key(sender)]
     if command=="JOIN" and game.status=="LOBBY" and not p and #players()<40 then
         game.players[key(sender)]={name=sender,paid=game.stake==0,ready=false,active=true,points=0}; broadcast()
@@ -157,6 +160,26 @@ function R:Request(command,sender,argument,bout)
     elseif command=="PICK" and game.status=="RUNNING" and p and p.active and not p.choice and labels[argument] and tonumber(bout)==game.bout then
         p.choice=argument; p.chosen=true; broadcast(); settleBout()
     end
+end
+function R:AddTestPlayer()
+    if not host() or game.status~="LOBBY" or game.stake~=0 or #players()~=1 then return false end
+    game.testBot=true
+    game.players[key("TestBot")]={name="TestBot",paid=true,ready=true,active=true,points=0}
+    game.notice="LOCAL TEST — TestBot is ready. No group messages or gold."
+    refresh(); return true
+end
+function R:RunTestBot()
+    if not host() or not game.testBot or game.status~="RUNNING" then return end
+    local p=game.players[key("TestBot")]
+    if not p or not p.active or p.choice then return end
+    local id=game.id..":"..game.bout
+    if self.botPending==id then return end
+    self.botPending=id
+    local wager,bout=game,game.bout
+    C_Timer.After(.6,function()
+        if R.botPending==id then R.botPending=nil end
+        if game==wager and game.status=="RUNNING" and game.bout==bout then R:Request("PICK","TestBot",({"R","P","S"})[math.random(3)],bout) end
+    end)
 end
 function R:Create(stake,bestOf)
     if game and game.status~="CLOSED" then printLine("Finish the open RPS game first."); return end
@@ -456,6 +479,7 @@ function R:RenderEmbedded(controller,config)
     view.paymentContent:SetHeight(math.max(1,#players()*52)); view.paymentPot:SetText("Current pot: "..moneyText(pot()))
 end
 local function receive(message,sender)
+    if game and game.testBot then return end
     if not readable(message) or not groupMember(sender) or same(sender,me()) then return end
     local p={}; for part in (message.."\t"):gmatch("(.-)\t") do p[#p+1]=part end
     local cmd,id,rev=p[1],p[2],tonumber(p[3])

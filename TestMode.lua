@@ -200,6 +200,13 @@ function Test:Open()
         self.text=self.content:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); self.text:SetPoint("TOPLEFT"); self.text:SetWidth(640); self.text:SetJustifyH("LEFT"); self.text:SetJustifyV("TOP")
         button("Confirm settlement",18,605,180,function() Test:PayWinner() end)
         button("Cancel test bet",206,605,155,function() StaticPopup_Show("GAMBLE_TEST_CANCEL") end)
+        button("Add Fake Player",370,605,180,function()
+            local added=false
+            if GambleRPS and GambleRPS.AddTestPlayer then added=GambleRPS:AddTestPlayer() end
+            if not added and GambleDON and GambleDON.AddTestPlayer then added=GambleDON:AddTestPlayer() end
+            Test.message=added and "TestBot added to your lobby: automatically ready and random choices / rolls." or "Open your own empty Pussy Mode DoN or RPS lobby first."
+            if added then Test.frame:Hide() end
+        end)
         local result=CreateFrame("Frame",nil,UIParent,"BasicFrameTemplateWithInset"); result:SetSize(440,165); result:SetPoint("CENTER",0,180); result:SetFrameStrata("FULLSCREEN_DIALOG"); result.TitleText:SetText("Gamble — TEST Result")
         self.resultFrame=result; self.resultText=result:CreateFontString(nil,"OVERLAY","GameFontHighlight"); self.resultText:SetPoint("TOPLEFT",18,-45); self.resultText:SetWidth(400)
         result:Hide(); f:HookScript("OnHide",function() result:Hide() end)
