@@ -461,8 +461,7 @@ function R:RenderEmbedded(controller,config)
     view.history:ClearAllPoints(); view.history:SetPoint("TOPLEFT",6,-(#players()*46+8)); view.history:SetText(#history>0 and ("|cffffd100Round History|r\n"..table.concat(history,"\n")) or "")
     view.content:SetHeight(math.max(1,#players()*46+(#history>0 and (#history*16+35) or 0)))
     if view.paymentGame~=game.id then view.paymentGame=game.id; view.paymentsOpen=false; view.paymentAutoOpened=false; view.paymentDismissed=false end
-    if #players()>1 and not view.paymentAutoOpened and not view.paymentDismissed then view.paymentsOpen=true; view.paymentAutoOpened=true end
-    view.paymentToggle:SetText(view.paymentsOpen and "Hide Payments" or "Show Payments"); view.paymentPopup:SetShown(view.paymentsOpen==true)
+    view.paymentsOpen=false; view.paymentToggle:Hide(); view.paymentPopup:Hide()
     for _,row in ipairs(view.paymentRows) do row:Hide() end
     for i,player in ipairs(players()) do
         local row=view.paymentRows[i]; if not row then

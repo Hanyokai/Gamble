@@ -4,7 +4,7 @@ Gamble = Gamble or {}
 
 local PREFIX = "GambleFW1"
 local VERSION = 32
-local ADDON_VERSION = "0.19.23"
+local ADDON_VERSION = "0.19.24"
 local floor, max = math.floor, math.max
 local DEFAULT_MINIMAP_RADIUS = 104 -- Abstand vom Mittelpunkt; kann auch mit /gamble minimap ZAHL gesetzt werden.
 local DEFAULT_MINIMAP_ANGLE = 225 -- Winkel in Grad; optional mit /gamble minimap RADIUS WINKEL setzen.
@@ -2584,30 +2584,9 @@ function Gamble:UpdateUnstartedSeries()
 end
 
 function Gamble:RefreshDetailsPopup(wager, text)
-    if not self.detailsPopup then return end
-    if not wager then
-        self.detailsButton:Hide(); self.detailsPopup:Hide()
-        return
-    end
-    self.detailsButton:Show()
-    self.detailsButton:SetText(self.detailsPopup:IsShown() and "Hide Payments" or "Show Payments")
-    self.detailsPopup.TitleText:SetText("Gamble - " .. BetLabel(wager.mode))
-    self.detailsText:SetText((text and text ~= "") and text or "No stakes or results yet.")
-    self.detailsContent:SetHeight(max(1, self.detailsText:GetStringHeight() + 12))
-    local hasExternalParticipant = false
-    for player in pairs(wager.paymentStatus or {}) do
-        if not SamePlayer(player, wager.host) then hasExternalParticipant = true; break end
-    end
-    if not hasExternalParticipant then
-        for _, bet in pairs(wager.bets or {}) do
-            if not SamePlayer(bet.bettor, wager.host) then hasExternalParticipant = true; break end
-        end
-    end
-    if hasExternalParticipant and not self.detailsPopup.autoOpened[wager.id] then
-        self.detailsPopup.autoOpened[wager.id] = true
-        self.detailsPopup:Show(); self.detailsPopup:Raise()
-        self.detailsButton:SetText("Hide Payments")
-    end
+    -- Payment status is shown in the main participant list; no duplicate side panel.
+    if self.detailsButton then self.detailsButton:Hide() end
+    if self.detailsPopup then self.detailsPopup:Hide() end
 end
 
 local function ActiveWagers()

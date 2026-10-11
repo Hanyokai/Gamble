@@ -521,7 +521,7 @@ function DON:RefreshDicePopup()
             if x and y and cx and cy then GambleDONDB.dicePosition={x=x-cx,y=y-cy} end
         end)
         local b=CreateFrame("Button",nil,popup); b:SetSize(48,48); b:SetPoint("TOP",0,0)
-        b.icon=b:CreateTexture(nil,"ARTWORK"); b.icon:SetAllPoints(); b.icon:SetTexture("Interface\\Icons\\INV_Misc_Dice_01")
+        b.icon=b:CreateTexture(nil,"ARTWORK"); b.icon:SetAllPoints(); b.icon:SetAtlas("lootroll-toast-icon-need-up",false)
         b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square","ADD")
         b:SetScript("OnClick",function() DON:Roll(); DON:RefreshDicePopup() end)
         b:SetScript("OnEnter",function(self)
@@ -1204,12 +1204,8 @@ function DON:RenderEmbedded(main, creationMode)
         local label = SamePlayer(session.winner, session.host) and "Net winnings" or "Payout"
         ui.embNotice:SetText("|cffffd100WINNER: " .. ShortName(session.winner) .. " — " .. label .. ": " .. Money(WinnerAmount()) .. "|r")
     else ui.embNotice:SetText("") end
-    ui.embPaymentToggle:SetText(ui.paymentPopup:IsShown() and "Hide Payments" or "Show Payments")
-    local externalPlayers = max(0, PlayerCount() - 1)
-    if externalPlayers > 0 and not ui.paymentPopup.autoOpened[session.id] and ui.paymentPopup.dismissedSessionID ~= session.id then
-        ui.paymentPopup.autoOpened[session.id] = true; ui.paymentPopup:Show(); ui.paymentPopup:Raise()
-    end
-    if ui.paymentPopup:IsShown() then DON:RefreshPaymentPopup() end
+    ui.embPaymentToggle:Hide()
+    ui.paymentPopup:Hide()
 end
 
 local events = CreateFrame("Frame")
