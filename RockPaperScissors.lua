@@ -532,6 +532,9 @@ for _,event in ipairs({"PLAYER_LOGIN","PLAYER_LOGOUT","PLAYER_ENTERING_WORLD","C
 frame:SetScript("OnEvent",function(_,event,...)
     if event=="PLAYER_LOGIN" then
         GambleRPSDB=GambleRPSDB or {}; game=GambleRPSDB.characters and GambleRPSDB.characters[me()]
+        if game and game.winner then
+            R.announcedWinners=R.announcedWinners or {}; R.announcedWinners[game.id]=true
+        end
         C_ChatInfo.RegisterAddonMessagePrefix(prefix)
         if host() then if game.status=="RUNNING" then settleBout() end; broadcast() else send("HELLO",nil) end
         return

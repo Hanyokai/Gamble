@@ -4,7 +4,7 @@ Gamble = Gamble or {}
 
 local PREFIX = "GambleFW1"
 local VERSION = 32
-local ADDON_VERSION = "0.19.22"
+local ADDON_VERSION = "0.19.23"
 local floor, max = math.floor, math.max
 local DEFAULT_MINIMAP_RADIUS = 104 -- Abstand vom Mittelpunkt; kann auch mit /gamble minimap ZAHL gesetzt werden.
 local DEFAULT_MINIMAP_ANGLE = 225 -- Winkel in Grad; optional mit /gamble minimap RADIUS WINKEL setzen.
@@ -4040,6 +4040,7 @@ function Gamble:OnEvent(event, ...)
         state.prefixRegistered = ok and result ~= false
         if ok then state.prefixRegisterError = nil else state.prefixRegisterError = tostring(result or "Registration API unavailable") end
         BuildRoster(); self:CreateUI(); self:CreateMinimapButton(); RecoverCompletedWagers(); self:Refresh(); state.restoringSession = nil
+        Print("Gypsy Gamble "..ADDON_VERSION.." loaded.")
         C_Timer.After(2, BroadcastVersion)
     elseif event == "PLAYER_LOGOUT" then
         SaveSession()

@@ -927,6 +927,8 @@ local function OnEvent(event, ...)
             end
         end
         debugEnabled = GambleDONDB.debug == true
+        -- Restored results remain available in details, but are not new wins.
+        if session and session.winner then ui.announcedResultKey=session.id..":"..tostring(session.winner) end
         if session then session.maxPlayers = 40; session.maxRounds = max(1, min(50, tonumber(session.maxRounds) or 5)) end
         if session and SamePlayer(session.host, PlayerName()) then SyncBankSession() end
         local register = C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix or RegisterAddonMessagePrefix
